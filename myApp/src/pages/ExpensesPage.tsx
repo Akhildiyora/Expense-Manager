@@ -39,8 +39,8 @@ const ExpensesPage: React.FC = () => {
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
 
   const total = useMemo(
-    () => expenses.reduce((sum, e) => sum + getPersonalShare(e), 0),
-    [expenses],
+    () => expenses.reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0),
+    [expenses, user?.id],
   )
 
   const startCreate = () => {
@@ -337,8 +337,8 @@ const ExpensesPage: React.FC = () => {
               </div>
               <div className="w-20 sm:w-28 shrink-0 text-slate-300 hidden sm:block truncate">{getPayerName(e.payer_id)}</div>
               <div className="w-20 sm:w-24 shrink-0 text-right">
-                <div className="text-emerald-400 font-bold">₹{getPersonalShare(e).toFixed(2)}</div>
-                {getPersonalShare(e) !== Number(e.amount) && (
+                <div className="text-emerald-400 font-bold">₹{getPersonalShare(e, user?.id).toFixed(2)}</div>
+                {getPersonalShare(e, user?.id) !== Number(e.amount) && (
                   <div className="text-[10px] text-slate-500">of ₹{Number(e.amount).toFixed(2)}</div>
                 )}
               </div>

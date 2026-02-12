@@ -51,6 +51,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     void init()
 
+    // NEW: Auto-link friends on mount/login
+    const linkFriends = async () => {
+       const { data: { session } } = await supabase.auth.getSession()
+       if (session?.user) {
+         await supabase.rpc('link_user_to_friends')
+       }
+    }
+    void linkFriends()
+
     const INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
     const checkToken = async () => {

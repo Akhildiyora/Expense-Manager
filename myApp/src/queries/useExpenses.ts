@@ -19,6 +19,7 @@ export type Expense = {
     friend_id: string | null
     owed_to_friend_id: string | null
     share_amount: number
+    friends?: { linked_user_id: string | null } | null
   }[]
 }
 
@@ -51,7 +52,7 @@ export const useExpenses = (filters: ExpenseFilters = {}) => {
       setError(null)
       let query = supabase
         .from('expenses')
-        .select('*, expense_splits(*)')
+        .select('*, expense_splits(*, friends(linked_user_id))')
 
       // Apply Filters
       if (filters.fromDate) {

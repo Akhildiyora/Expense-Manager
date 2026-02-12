@@ -16,12 +16,36 @@ const ProfilePage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   useEffect(() => {
-    if (user) {
-      setFirstName(user.user_metadata?.first_name || '')
-      setLastName(user.user_metadata?.last_name || '')
-      setEmail(user.email || '')
-      setPhone(user.phone || '')
+    const fetchProfile = async () => {
+      if (!user) return
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+        
+        if (data) {
+          setFirstName(data.first_name || user.user_metadata?.first_name || '')
+          setLastName(data.last_name || user.user_metadata?.last_name || '')
+          setEmail(data.email || user.email || '')
+          setPhone(data.phone || user.user_metadata?.phone || '')
+        } else {
+            // Fallback to metadata
+            setFirstName(user.user_metadata?.first_name || '')
+            setLastName(user.user_metadata?.last_name || '')
+            setEmail(user.email || '')
+            setPhone(user.phone || '')
+        }
+      } catch (err) {
+        // Fallback
+        setFirstName(user.user_metadata?.first_name || '')
+        setLastName(user.user_metadata?.last_name || '')
+        setEmail(user.email || '')
+        setPhone(user.phone || '')
+      }
     }
+    void fetchProfile()
   }, [user])
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
@@ -34,28 +58,44 @@ const ProfilePage: React.FC = () => {
         throw new Error('Passwords do not match')
       }
 
-      const updates: any = {
-        data: {
+      // 1. Update Profile Table (Primary Source of Truth)
+      const updates = {
           first_name: firstName,
           last_name: lastName,
           full_name: `${firstName} ${lastName}`.trim(),
+          phone: phone, // Store phone in profile too
+          email: email,
+          updated_at: new Date().toISOString(),
+      }
+      
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({ id: user?.id, ...updates })
+
+      if (profileError) throw profileError
+      
+      // 2. Update Auth User (Syncs metadata & Auth details)
+      const authUpdates: any = {
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          full_name: updates.full_name,
+          phone: phone,
         },
       }
 
-      if (email !== user?.email) updates.email = email
-      if (phone !== user?.phone) updates.phone = phone
-      if (password) updates.password = password
+      if (email !== user?.email) authUpdates.email = email
+      // Note: Phone update in Auth requires SMS verification usually, so we might skip it here unless strict
+      // or we handle the OTP flow. For now, we update metadata which is safe.
+      if (password) authUpdates.password = password
 
-      const { data, error } = await supabase.auth.updateUser(updates)
+      const { data, error: authError } = await supabase.auth.updateUser(authUpdates)
 
-      if (error) throw error
+      if (authError) throw authError
 
       let msg = 'Profile updated successfully!'
-      if (updates.email && data.user?.email !== email) {
+      if (authUpdates.email && data.user?.email !== email) {
         msg += ' Please check your new email for a verification link.'
-      }
-      if (updates.phone && data.user?.phone !== phone) {
-        msg += ' Please check your phone for a verification code.'
       }
 
       setMessage({ type: 'success', text: msg })
