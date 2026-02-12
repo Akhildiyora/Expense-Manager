@@ -52,7 +52,7 @@ export const useExpenses = (filters: ExpenseFilters = {}) => {
       setError(null)
       let query = supabase
         .from('expenses')
-        .select('*, expense_splits(*, friends(linked_user_id))')
+        .select('*, expense_splits(*, friends!friend_id(linked_user_id))')
 
       // Apply Filters
       if (filters.fromDate) {
