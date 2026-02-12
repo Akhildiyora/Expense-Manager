@@ -1,19 +1,21 @@
 import React from 'react'
 import { Select } from '../../components/Select'
-import { QueueListIcon, CurrencyRupeeIcon } from '@heroicons/react/24/outline'
+import { QueueListIcon, CurrencyRupeeIcon, ArrowsRightLeftIcon } from '@heroicons/react/24/outline'
 
 interface TripExpensesProps {
   expenses: any[]
   friends: any[]
   onAddExpense: () => void
   onSelectExpense: (id: string) => void
+  canAdd?: boolean
 }
 
 export const TripExpenses: React.FC<TripExpensesProps> = ({
   expenses,
   friends,
   onAddExpense,
-  onSelectExpense
+  onSelectExpense,
+  canAdd = true
 }) => {
   const [search, setSearch] = React.useState('')
   const [paymentMode, setPaymentMode] = React.useState<string>('')
@@ -44,13 +46,15 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
             <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-widest flex items-center gap-2">
             <QueueListIcon className="w-4 h-4" /> Trip Expenses
             </h3>
-            <button 
-            onClick={onAddExpense}
-            className="flex items-center gap-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 px-3 py-1.5 rounded-lg text-xs font-semibold transition border border-sky-500/20"
-            >
-            <CurrencyRupeeIcon className="w-4 h-4" />
-            Add Trip Expense
-            </button>
+            {canAdd && (
+              <button 
+                onClick={onAddExpense}
+                className="flex items-center gap-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 px-3 py-1.5 rounded-lg text-xs font-semibold transition border border-sky-500/20"
+              >
+                <CurrencyRupeeIcon className="w-4 h-4" />
+                Add Trip Expense
+              </button>
+            )}
         </div>
 
 
@@ -107,22 +111,28 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
             {filteredExpenses.map(exp => (
               <li 
                 key={exp.id} 
-                className="p-4 flex items-center justify-between hover:bg-slate-800/40 cursor-pointer transition group"
+                className={`p-4 flex items-center justify-between hover:bg-slate-800/40 cursor-pointer transition group ${exp.is_settlement ? 'bg-emerald-500/5 hover:bg-emerald-500/10' : ''}`}
                 onClick={() => onSelectExpense(exp.id)}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex flex-col items-center justify-center text-[10px]">
-                    <span className="font-bold text-slate-300">{new Date(exp.date).getDate()}</span>
-                    <span className="uppercase text-slate-500 font-medium">{new Date(exp.date).toLocaleString('default', { month: 'short' })}</span>
+                  <div className={`w-10 h-10 rounded-xl border flex flex-col items-center justify-center text-[10px] ${exp.is_settlement ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>
+                    {exp.is_settlement ? (
+                        <ArrowsRightLeftIcon className="w-5 h-5" />
+                    ) : (
+                        <>
+                            <span className="font-bold">{new Date(exp.date).getDate()}</span>
+                            <span className="uppercase text-slate-500 font-medium">{new Date(exp.date).toLocaleString('default', { month: 'short' })}</span>
+                        </>
+                    )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-200 truncate max-w-[150px] sm:max-w-xs">{exp.title}</p>
+                    <p className={`text-sm font-medium truncate max-w-[150px] sm:max-w-xs ${exp.is_settlement ? 'text-emerald-400' : 'text-slate-200'}`}>{exp.title}</p>
                     <p className="text-[10px] text-slate-500">
                       Paid by {exp.payer_id ? friends.find((f: any) => f.id === exp.payer_id)?.name || 'Friend' : 'You'}
                     </p>
                   </div>
                 </div>
-                <p className="text-sm font-bold text-slate-100">₹{Number(exp.amount).toFixed(2)}</p>
+                <p className={`text-sm font-bold ${exp.is_settlement ? 'text-emerald-400' : 'text-slate-100'}`}>₹{Number(exp.amount).toFixed(2)}</p>
               </li>
             ))}
           </ul>

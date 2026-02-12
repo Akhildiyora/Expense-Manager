@@ -1,6 +1,8 @@
-import React from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import React, { useState } from 'react'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useNotifications } from '../context/NotificationContext'
+import NotificationDropdown from '../components/NotificationDropdown'
 
 const navItems = [
   { to: '/app', label: 'Dashboard', icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z M14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z M4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z M14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
@@ -13,37 +15,33 @@ const navItems = [
 
 const AppLayout: React.FC = () => {
   const { user, signOut } = useAuth()
+  const { unreadCount } = useNotifications()
+  const navigate = useNavigate()
+  const location = useLocation()
 
-  const [sidebarOpen, setSidebarOpen] = React.useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [notificationOpen, setNotificationOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col md:flex-row">
-      <button
-        type="button"
-        onClick={() => setSidebarOpen((o) => !o)}
-        className={`md:hidden fixed top-4 left-4 z-40 p-2 rounded-lg bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-slate-100 ${sidebarOpen ? 'hidden' : ''}`}
-        aria-label="Toggle menu"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
+    <div className="min-h-screen bg-slate-950 text-slate-50 flex md:flex-row">
+      {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div
-          className="md:hidden fixed inset-0 z-20 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
           onClick={() => setSidebarOpen(false)}
           aria-hidden
         />
       )}
+
+      {/* Sidebar */}
       <aside
-        className={`fixed md:sticky top-0 h-screen inset-y-0 left-0 z-30 w-64 border-r border-slate-800/80 bg-slate-900/95 md:bg-slate-900/80 flex flex-col shrink-0 transition-transform duration-200 ease-out ${
+        className={`fixed md:sticky top-0 h-screen inset-y-0 left-0 z-50 w-64 border-r border-slate-800/80 bg-slate-900/95 md:bg-slate-900/80 flex flex-col shrink-0 transition-transform duration-200 ease-out ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
-          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between shrink-0">
+          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between shrink-0 h-16">
             <div>
               <h1 className="text-lg font-bold tracking-tight text-slate-50">Expense Tracker</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Track spending & splits</p>
             </div>
             <button
               type="button"
@@ -91,11 +89,83 @@ const AppLayout: React.FC = () => {
             </div>
           </div>
         </aside>
-      <main className="flex-1 p-4 sm:p-6 pt-16 md:pt-6 overflow-x-hidden min-w-0">
-        <div className="mx-auto max-w-6xl">
-          <Outlet />
-        </div>
-      </main>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {/* Global Header */}
+        <header className="h-16 shrink-0 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm flex items-center justify-between px-4 sm:px-6 z-30 sticky top-0">
+            <div className="flex items-center gap-3">
+                {/* Mobile Menu Toggle */}
+                <button
+                    type="button"
+                    onClick={() => setSidebarOpen(true)}
+                    className="md:hidden -ml-2 p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 transition"
+                    aria-label="Open menu"
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+                {/* Conditional Header Actions */}
+                {location.pathname.match(/^\/app\/trips\/[^/]+/) ? (
+                    <div id="trip-header-portal" className="flex items-center gap-4"></div>
+                ) : (
+                    <>
+                        {/* Global Add Expense Button */}
+                        <button
+                            onClick={() => navigate('/app/expenses?new=1')}
+                            className="hidden sm:flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-3 py-1.5 rounded-lg text-sm font-semibold transition"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            Add Expense
+                        </button>
+                        <button
+                            onClick={() => navigate('/app/expenses?new=1')}
+                            className="sm:hidden flex items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-slate-950 w-8 h-8 rounded-full text-sm font-semibold transition"
+                            aria-label="Add Expense"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                        </button>
+
+                        {/* Notifications */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setNotificationOpen(!notificationOpen)}
+                                className="p-2 rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition relative"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                </svg>
+                                {unreadCount > 0 && (
+                                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-slate-900" />
+                                )}
+                            </button>
+
+                            {/* Notification Dropdown */}
+                            <NotificationDropdown 
+                                isOpen={notificationOpen} 
+                                onClose={() => setNotificationOpen(false)} 
+                            />
+                        </div>
+                    </>
+                )}
+            </div>
+        </header>
+
+        {/* Scrollable Content */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-20 md:pb-6 custom-scrollbar">
+            <div className="mx-auto max-w-6xl">
+                <Outlet />
+            </div>
+        </main>
+      </div>
     </div>
   )
 }

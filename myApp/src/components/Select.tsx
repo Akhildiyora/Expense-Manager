@@ -5,7 +5,9 @@ interface Option {
   value: string
   label: string
   isHeader?: boolean
+  className?: string
 }
+
 
 interface SelectProps {
   label?: string
@@ -83,7 +85,7 @@ export const Select: React.FC<SelectProps> = ({
                     value === option.value
                       ? 'bg-emerald-500/10 text-emerald-400 font-medium'
                       : 'text-slate-300 hover:bg-slate-700/50 hover:text-slate-100'
-                  }`}
+                  } ${option.className || ''}`}
                 >
                   <span className="truncate">{option.label}</span>
                   {value === option.value && (

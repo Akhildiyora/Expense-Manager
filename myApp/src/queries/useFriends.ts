@@ -6,6 +6,8 @@ export type Friend = {
   id: string
   user_id: string
   name: string
+  email?: string
+  linked_user_id?: string
 }
 
 export const useFriends = () => {

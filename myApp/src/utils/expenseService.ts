@@ -17,6 +17,7 @@ export type ExpenseFormState = {
   payerId: 'you' | string
   trip_id: string | null
   payment_mode: 'cash' | 'online' | 'card'
+  is_settlement?: boolean
 }
 
 export const saveExpense = async (form: ExpenseFormState, userId: string) => {
@@ -32,6 +33,7 @@ export const saveExpense = async (form: ExpenseFormState, userId: string) => {
     payer_id: form.payerId === 'you' ? null : form.payerId,
     trip_id: form.trip_id || null,
     payment_mode: form.payment_mode || 'cash',
+    is_settlement: form.is_settlement || false,
   }
 
   let expenseId = form.id
@@ -111,6 +113,63 @@ export const saveExpense = async (form: ExpenseFormState, userId: string) => {
             .insert(rows)
 
           if (splitError) throw splitError
+
+          // Send Notifications
+          // 1. Get registered_user_id for all friends involved
+          const friendIdsUnique = [...new Set(form.friendIds)]
+          if (friendIdsUnique.length > 0) {
+              const { data: friendsData } = await supabase
+                .from('friends')
+                .select('id, name, registered_user_id')
+                .in('id', friendIdsUnique)
+              
+              if (friendsData) {
+                  // Create notification records
+                  const notifications = []
+                  
+                  for (const row of rows) {
+                      // We only notify if there is a friend involved who needs to pay or receive
+                      // Case 1: You paid, Friend owes you. (row.friend_id is friend, row.owed_to is null)
+                      if (row.friend_id && !row.owed_to_friend_id) {
+                          const friend = friendsData.find(f => f.id === row.friend_id)
+                          if (friend?.registered_user_id) {
+                              notifications.push({
+                                  user_id: friend.registered_user_id,
+                                  title: 'New Expense Split',
+                                  message: `You owe ${Number(row.share_amount).toFixed(2)} for ${form.title}`,
+                                  type: 'expense',
+                                  trip_id: form.trip_id || null, // Ensure trip_id is set
+                                  metadata: { expense_id: expenseId, amount: row.share_amount }
+                              })
+                          }
+                      }
+                      
+                      // Case 2: Friend paid. You owe Friend. (row.friend_id is null/user, row.owed_to is friend)
+                      // We don't notify ourselves.
+                      
+                      // Case 3: Friend A paid, Friend B owes. (row.friend_id is B, row.owed_to is A)
+                      if (row.friend_id && row.owed_to_friend_id) {
+                          const debtor = friendsData.find(f => f.id === row.friend_id)
+                          const creditor = friendsData.find(f => f.id === row.owed_to_friend_id)
+                          
+                          if (debtor?.registered_user_id) {
+                              notifications.push({
+                                  user_id: debtor.registered_user_id,
+                                  title: 'New Expense Split',
+                                  message: `You owe ${creditor?.name || 'someone'} ${Number(row.share_amount).toFixed(2)} for ${form.title}`,
+                                  type: 'expense',
+                                  trip_id: form.trip_id || null,
+                                  metadata: { expense_id: expenseId, amount: row.share_amount }
+                              })
+                          }
+                      }
+                  }
+
+                  if (notifications.length > 0) {
+                      await supabase.from('notifications').insert(notifications)
+                  }
+              }
+          }
         }
       }
     }

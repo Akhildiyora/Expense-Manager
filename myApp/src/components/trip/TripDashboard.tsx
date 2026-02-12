@@ -19,7 +19,8 @@ type TripMember = {
   friend_id: string
   friends: {
     name: string
-  }
+    email?: string
+  } | null
 }
 
 interface TripDashboardProps {

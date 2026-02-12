@@ -14,6 +14,7 @@ import { Select } from '../components/Select'
 const FriendsPage: React.FC = () => {
   const { friends, loading, error, setFriends } = useFriends()
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const { user } = useAuth()
   const { categories } = useCategories()
@@ -105,15 +106,44 @@ const FriendsPage: React.FC = () => {
     if (!name.trim()) return
     if (!user) return
     setSaving(true)
-    const { data, error: insertError } = await supabase
-      .from('friends')
-      .insert({ name: name.trim(), user_id: user.id })
-      .select()
-      .single()
-    setSaving(false)
-    if (insertError) return
-    setFriends([data, ...friends])
-    setName('')
+
+    try {
+      let result;
+      
+      if (email.trim()) {
+        // Use RPC to link user by email
+        const { data, error } = await supabase.rpc('add_friend_by_email', {
+          friend_name: name.trim(),
+          friend_email: email.trim()
+        })
+        if (error) throw error
+        
+        // Fetch the full friend object since RPC returns partial/different structure or just ID
+        // Actually RPC returns json with id, linked_user_id. We need full object for UI state.
+        // Simplest is to just re-fetch or fetch single by ID.
+        const { data: newFriend } = await supabase.from('friends').select('*').eq('id', (data as any).id).single()
+        result = { data: newFriend, error: null }
+      } else {
+        // Standard insert
+        result = await supabase
+          .from('friends')
+          .insert({ name: name.trim(), user_id: user.id })
+          .select()
+          .single()
+      }
+
+      if (result.error) throw result.error
+      if (result.data) {
+        setFriends([result.data, ...friends])
+        setName('')
+        setEmail('')
+      }
+    } catch (err) {
+      console.error('Error adding friend:', err)
+      alert('Failed to add friend. Please try again.')
+    } finally {
+       setSaving(false)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -122,6 +152,55 @@ const FriendsPage: React.FC = () => {
     if (!ok) return
     await supabase.from('friends').delete().eq('id', id)
     setFriends(friends.filter((f) => f.id !== id))
+  }
+
+  // Edit Mode State
+  const [editingId, setEditingId] = useState<string | null>(null)
+  
+  const handleEditClick = (friend: any) => {
+    setEditingId(friend.id)
+    setName(friend.name)
+    setEmail(friend.email || '')
+  }
+
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    setName('')
+    setEmail('')
+  }
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingId || !name.trim()) return
+    setSaving(true)
+
+    try {
+      const { data, error } = await supabase.rpc('update_friend_with_email', {
+        p_friend_id: editingId,
+        p_name: name.trim(),
+        p_email: email.trim() || null
+      })
+
+      if (error) throw error
+
+      // Update local state
+      setFriends(friends.map(f => f.id === editingId ? data : f))
+      handleCancelEdit()
+    } catch (err) {
+      console.error('Error updating friend:', err)
+      alert('Failed to update friend.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Modified Add/Update Form Handler
+  const handleSubmit = (e: React.FormEvent) => {
+    if (editingId) {
+      handleUpdate(e)
+    } else {
+      handleAdd(e)
+    }
   }
 
   useEffect(() => {
@@ -192,15 +271,17 @@ const FriendsPage: React.FC = () => {
   const toGet = Object.entries(balances).filter(([, v]) => v > 0.005).reduce((s, [, v]) => s + v, 0)
   const toPay = Object.entries(balances).filter(([, v]) => v < -0.005).reduce((s, [, v]) => s + Math.abs(v), 0)
 
+
   return (
     <div className="space-y-6">
       <header className="pt-14 md:pt-0">
         <h2 className="text-xl font-semibold text-slate-50">Friends</h2>
         <p className="text-sm text-slate-400 mt-0.5">
-          Manage people you split with. Balances: to get from others / to pay to others.
+          Manage people you split with. Add their email to share data.
         </p>
       </header>
 
+      {/* ... (Balances Section) ... */}
       {(toGet > 0 || toPay > 0) && (
         <section className="grid grid-cols-2 gap-4">
           <div className="rounded-2xl border border-emerald-800/50 bg-emerald-950/30 p-4">
@@ -217,25 +298,52 @@ const FriendsPage: React.FC = () => {
       )}
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-        <form onSubmit={handleAdd} className="flex flex-wrap gap-3 items-end text-sm">
-          <div className="flex-1 min-w-[160px]">
-            <label className="block mb-1.5 text-slate-400 text-xs font-medium">Add New Friend</label>
+        <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-3 items-end text-sm">
+          <div className="flex-1 w-full md:min-w-[160px]">
+            <label className="block mb-1.5 text-slate-400 text-xs font-medium">
+              {editingId ? 'Edit Name' : "Friend's Name"}
+            </label>
             <input
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Friend's name"
+              placeholder="e.g. John Doe"
               className="w-full rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
             />
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-medium disabled:opacity-60 transition"
-          >
-            {saving ? 'Adding…' : 'Add friend'}
-          </button>
+          <div className="flex-1 w-full md:min-w-[200px]">
+            <label className="block mb-1.5 text-slate-400 text-xs font-medium">
+              {editingId ? 'Edit Email' : 'Email Address (Optional)'}
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="To link account & share data"
+              className="w-full rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className={`w-full md:w-auto px-6 py-2 rounded-xl text-slate-950 text-sm font-medium disabled:opacity-60 transition shrink-0 ${
+                editingId ? 'bg-amber-500 hover:bg-amber-400' : 'bg-emerald-500 hover:bg-emerald-400'
+              }`}
+            >
+              {saving ? (editingId ? 'Updating...' : 'Adding...') : (editingId ? 'Update' : 'Add friend')}
+            </button>
+            {editingId && (
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium transition"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
       </section>
 
@@ -295,7 +403,15 @@ const FriendsPage: React.FC = () => {
                 onClick={() => handleFriendClick(f)}
                 className="px-4 py-3 text-sm text-slate-200 flex items-center gap-2 sm:gap-4 hover:bg-slate-800/40 transition cursor-pointer group"
               >
-                <div className="flex-1 font-medium min-w-0 truncate group-hover:text-emerald-400 transition">{f.name}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate group-hover:text-emerald-400 transition flex items-center gap-2">
+                    {f.name}
+                    {f.linked_user_id && (
+                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-400 border border-sky-500/30">Linked</span>
+                    )}
+                  </div>
+                  {f.email && <div className="text-xs text-slate-500 truncate">{f.email}</div>}
+                </div>
                 <div className="w-24 text-right text-slate-400">₹{details.paid.toFixed(2)}</div>
                 <div className="w-24 text-right text-amber-500/80">₹{details.userOwes.toFixed(2)}</div>
                 <div className="w-24 text-right text-emerald-500/80">₹{details.theyOwe.toFixed(2)}</div>
@@ -309,6 +425,16 @@ const FriendsPage: React.FC = () => {
                   )}
                 </div>
                 <div className="w-16 sm:w-20 shrink-0 text-right">
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-amber-400 text-xs font-medium mr-3"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleEditClick(f)
+                    }}
+                  >
+                    Edit
+                  </button>
                   <button
                     type="button"
                     className="text-red-400 hover:text-red-300 text-xs font-medium"
