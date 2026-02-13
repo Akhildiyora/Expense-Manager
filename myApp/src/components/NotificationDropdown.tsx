@@ -87,7 +87,7 @@ const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ isOpen, onC
                                       {notification.message}
                                   </p>
                                   <p className="text-[10px] text-slate-600 mt-1.5">
-                                      {new Date(notification.created_at).toLocaleDateString()}
+                                      {new Date(notification.created_at).toLocaleString()}
                                   </p>
                               </div>
                           </div>

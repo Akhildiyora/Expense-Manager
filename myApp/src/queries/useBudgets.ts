@@ -31,6 +31,7 @@ export const useBudgets = () => {
         .from('budgets')
         .select('*')
         .order('created_at', { ascending: false })
+        console.log(data)
 
       if (err) {
         setError(err.message)
