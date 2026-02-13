@@ -5,6 +5,7 @@ import { QueueListIcon, CurrencyRupeeIcon, ArrowsRightLeftIcon } from '@heroicon
 interface TripExpensesProps {
   expenses: any[]
   friends: any[]
+  categories: any[]
   onAddExpense: () => void
   onSelectExpense: (id: string) => void
   canAdd?: boolean
@@ -13,12 +14,14 @@ interface TripExpensesProps {
 export const TripExpenses: React.FC<TripExpensesProps> = ({
   expenses,
   friends,
+  categories,
   onAddExpense,
   onSelectExpense,
   canAdd = true
 }) => {
   const [search, setSearch] = React.useState('')
   const [paymentMode, setPaymentMode] = React.useState<string>('')
+  const [categoryFilter, setCategoryFilter] = React.useState<string>('')
   const [sortBy, setSortBy] = React.useState<'date' | 'amount'>('date')
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc')
 
@@ -27,7 +30,8 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
       .filter(e => {
         const matchesSearch = e.title.toLowerCase().includes(search.toLowerCase())
         const matchesMode = paymentMode ? e.payment_mode === paymentMode : true
-        return matchesSearch && matchesMode
+        const matchesCategory = categoryFilter ? e.category_id === categoryFilter : true
+        return matchesSearch && matchesMode && matchesCategory
       })
       .sort((a, b) => {
         const ord = sortOrder === 'asc' ? 1 : -1
@@ -37,7 +41,43 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
           return (Number(a.amount) - Number(b.amount)) * ord
         }
       })
-  }, [expenses, search, paymentMode, sortBy, sortOrder])
+  }, [expenses, search, paymentMode, categoryFilter, sortBy, sortOrder])
+
+  // Prepare category options for select
+  const categoryOptions = React.useMemo(() => {
+      // 1. Identify used categories
+      const usedCategoryIds = new Set(expenses.map(e => e.category_id).filter(Boolean))
+
+      // 2. Filter and format
+      const options = categories
+          .filter(c => usedCategoryIds.has(c.id))
+          .map(c => {
+              let label = c.name
+              if (c.parent_id) {
+                  const parent = categories.find(p => p.id === c.parent_id)
+                  if (parent) {
+                      label = `${c.name} (${parent.name.toLowerCase()})`
+                  }
+              }
+              return { value: c.id, label }
+          })
+          .sort((a, b) => a.label.localeCompare(b.label))
+
+      return [
+          { value: '', label: 'All Categories' },
+          ...options
+      ]
+  }, [categories, expenses])
+
+  const getCategoryName = (id: string) => {
+      const c = categories.find(cat => cat.id === id)
+      if (!c) return 'Uncategorized'
+      if (c.parent_id) {
+          const parent = categories.find(p => p.id === c.parent_id)
+          if (parent) return `${c.name} (${parent.name.toLowerCase()})`
+      }
+      return c.name
+  }
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -66,6 +106,15 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
                 onChange={(e) => setSearch(e.target.value)}
                 className="flex-[2] min-w-[120px] rounded-xl border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
             />
+            <div className="flex-1 min-w-[120px]">
+               <Select
+                  value={categoryFilter}
+                  onChange={(val) => setCategoryFilter(val)}
+                  options={categoryOptions}
+                  placeholder="All Categories"
+                  className="w-full"
+               />
+            </div>
             <div className="flex-1 min-w-[120px]">
                <Select
                   value={paymentMode}
@@ -126,7 +175,14 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
                     )}
                   </div>
                   <div>
-                    <p className={`text-sm font-medium truncate max-w-[150px] sm:max-w-xs ${exp.is_settlement ? 'text-emerald-400' : 'text-slate-200'}`}>{exp.title}</p>
+                    <div className="flex items-center gap-2">
+                        <p className={`text-sm font-medium truncate max-w-[150px] sm:max-w-xs ${exp.is_settlement ? 'text-emerald-400' : 'text-slate-200'}`}>{exp.title}</p>
+                        {!exp.is_settlement && exp.category_id && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
+                                {getCategoryName(exp.category_id)}
+                            </span>
+                        )}
+                    </div>
                     <p className="text-[10px] text-slate-500">
                       Paid by {exp.payer_id ? friends.find((f: any) => f.id === exp.payer_id)?.name || 'Friend' : 'You'}
                     </p>

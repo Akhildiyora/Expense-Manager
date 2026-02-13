@@ -115,12 +115,12 @@ export const saveExpense = async (form: ExpenseFormState, userId: string) => {
           if (splitError) throw splitError
 
           // Send Notifications
-          // 1. Get registered_user_id for all friends involved
+          // 1. Get linked_user_id for all friends involved
           const friendIdsUnique = [...new Set(form.friendIds)]
           if (friendIdsUnique.length > 0) {
               const { data: friendsData } = await supabase
                 .from('friends')
-                .select('id, name, registered_user_id')
+                .select('id, name, linked_user_id')
                 .in('id', friendIdsUnique)
               
               if (friendsData) {
@@ -132,9 +132,9 @@ export const saveExpense = async (form: ExpenseFormState, userId: string) => {
                       // Case 1: You paid, Friend owes you. (row.friend_id is friend, row.owed_to is null)
                       if (row.friend_id && !row.owed_to_friend_id) {
                           const friend = friendsData.find(f => f.id === row.friend_id)
-                          if (friend?.registered_user_id) {
+                          if (friend?.linked_user_id) {
                               notifications.push({
-                                  user_id: friend.registered_user_id,
+                                  user_id: friend.linked_user_id,
                                   title: 'New Expense Split',
                                   message: `You owe ${Number(row.share_amount).toFixed(2)} for ${form.title}`,
                                   type: 'expense',
@@ -152,9 +152,9 @@ export const saveExpense = async (form: ExpenseFormState, userId: string) => {
                           const debtor = friendsData.find(f => f.id === row.friend_id)
                           const creditor = friendsData.find(f => f.id === row.owed_to_friend_id)
                           
-                          if (debtor?.registered_user_id) {
+                          if (debtor?.linked_user_id) {
                               notifications.push({
-                                  user_id: debtor.registered_user_id,
+                                  user_id: debtor.linked_user_id,
                                   title: 'New Expense Split',
                                   message: `You owe ${creditor?.name || 'someone'} ${Number(row.share_amount).toFixed(2)} for ${form.title}`,
                                   type: 'expense',

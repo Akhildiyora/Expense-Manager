@@ -76,8 +76,37 @@ const TripsPage: React.FC = () => {
           .eq('id', editingTripId)
         if (tripErr) throw tripErr
 
-        // Update members: delete and re-insert (simplest way)
-        await supabase.from('trip_members').delete().eq('trip_id', editingTripId)
+        // Smart Update Members (Preserve roles/user_ids)
+        // 1. Fetch current members
+        const { data: currentMembers } = await supabase
+            .from('trip_members')
+            .select('friend_id')
+            .eq('trip_id', editingTripId)
+        
+        const currentMemberIds = currentMembers?.map(m => m.friend_id) || []
+        const newMemberIds = form.memberIds
+
+        // 2. Determine Additions and Removals
+        const toAdd = newMemberIds.filter(id => !currentMemberIds.includes(id))
+        const toRemove = currentMemberIds.filter(id => !newMemberIds.includes(id))
+
+        // 3. Execute Updates
+        if (toRemove.length > 0) {
+            await supabase
+                .from('trip_members')
+                .delete()
+                .eq('trip_id', editingTripId)
+                .in('friend_id', toRemove)
+        }
+
+        if (toAdd.length > 0) {
+            const memberRows = toAdd.map(friendId => ({
+                trip_id: editingTripId,
+                friend_id: friendId
+            }))
+            await supabase.from('trip_members').insert(memberRows)
+        }
+
       } else {
         const { data: trip, error: tripErr } = await supabase
           .from('trips')
@@ -86,15 +115,15 @@ const TripsPage: React.FC = () => {
           .single()
         if (tripErr) throw tripErr
         tripId = trip.id
-      }
 
-      if (form.memberIds.length > 0 && tripId) {
-        const memberRows = form.memberIds.map(friendId => ({
-          trip_id: tripId,
-          friend_id: friendId
-        }))
-        const { error: memErr } = await supabase.from('trip_members').insert(memberRows)
-        if (memErr) throw memErr
+        if (form.memberIds.length > 0 && tripId) {
+            const memberRows = form.memberIds.map(friendId => ({
+              trip_id: tripId,
+              friend_id: friendId
+            }))
+            const { error: memErr } = await supabase.from('trip_members').insert(memberRows)
+            if (memErr) throw memErr
+        }
       }
 
       // Refresh trips
@@ -177,7 +206,7 @@ const TripsPage: React.FC = () => {
                 <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500 font-medium">
                   <span className="flex items-center gap-1 shrink-0"><CalendarIcon className="w-3.5 h-3.5" /> {trip.start_date || 'N/A'}</span>
                   <span className="shrink-0">•</span>
-                  <span className="flex items-center gap-1 shrink-0"><UserGroupIcon className="w-3.5 h-3.5" /> {(trip as any).member_count || 0} Members</span>
+                  <span className="flex items-center gap-1 shrink-0"><UserGroupIcon className="w-3.5 h-3.5" /> {((trip as any).member_count || 0) + 1} Members</span>
                 </div>
               </Link>
               <div className="flex gap-2 shrink-0 ml-4">
@@ -306,7 +335,7 @@ const TripsPage: React.FC = () => {
                   disabled={saving}
                   className="w-full py-3 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl font-bold shadow-lg shadow-sky-900/20 transition disabled:opacity-50"
                 >
-                  {saving ? 'Creating...' : 'Create Trip'}
+                  {saving ? (editingTripId ? 'Updating...' : 'Creating...') : (editingTripId ? 'Update Trip' : 'Create Trip')}
                </button>
             </form>
           </div>

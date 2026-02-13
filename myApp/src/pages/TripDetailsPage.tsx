@@ -376,7 +376,7 @@ const TripDetailsPage: React.FC = () => {
   }
 
   const tripTotal = useMemo(() => expenses.reduce((sum, e) => sum + Number(e.amount), 0), [expenses])
-  const personalTotal = useMemo(() => expenses.reduce((sum, e) => sum + getPersonalShare(e), 0), [expenses])
+  const personalTotal = useMemo(() => expenses.reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0), [expenses, user?.id])
 
   const memberStats = useMemo(() => {
     const stats: Record<string, { name: string; paid: number; share: number; balance: number }> = {}
@@ -384,30 +384,53 @@ const TripDetailsPage: React.FC = () => {
     // User stats
     stats['user'] = { name: 'You', paid: 0, share: 0, balance: 0 }
 
-    // Friend stats
+    // Initialize with known trip members
     members.forEach(m => {
       stats[m.friend_id] = { name: m.friends?.name || 'Unknown', paid: 0, share: 0, balance: 0 }
     })
 
+    // Helper to ensure stats entry exists
+    const ensureStat = (id: string) => {
+        if (!stats[id]) {
+            const friend = friends.find(f => f.id === id)
+            stats[id] = { name: friend?.name || 'Unknown', paid: 0, share: 0, balance: 0 }
+        }
+    }
+
     expenses.forEach(e => {
       const amount = Number(e.amount)
-      // Check who paid
-      if (e.payer_id === null) {
-        stats['user'].paid += amount
-      } else if (stats[e.payer_id]) {
-        stats[e.payer_id].paid += amount
+      let totalSplitAmount = 0
+      
+      // Determine payer key and ensure they exist in stats
+      const payerKey = e.payer_id === null ? 'user' : e.payer_id
+      if (payerKey !== 'user') {
+        ensureStat(payerKey)
       }
       
+      // Credit payment to payer
+      stats[payerKey].paid += amount
+
       // Process splits to calculate shares
       const splits = e.expense_splits || []
+      
       splits.forEach((s: { friend_id: string | null; share_amount: number }) => {
         const share = Number(s.share_amount)
+        totalSplitAmount += share
+        
         if (s.friend_id === null) {
           stats['user'].share += share
-        } else if (stats[s.friend_id]) {
+        } else {
+          ensureStat(s.friend_id)
           stats[s.friend_id].share += share
         }
       })
+
+      // Assign remaining amount to payer as their share
+      // This handles cases where payer is not explicitly in splits or splits are incomplete (implied payer share)
+      const remainder = amount - totalSplitAmount
+      if (remainder > 0.05) { // Small epsilon for float logic
+        stats[payerKey].share += remainder
+      }
     })
 
     // Final balance calculation
@@ -416,7 +439,7 @@ const TripDetailsPage: React.FC = () => {
     })
 
     return stats
-  }, [members, expenses])
+  }, [members, expenses, friends])
 
   const settlements = useMemo(() => {
     const participants = Object.entries(memberStats).map(([id, s]) => ({
@@ -485,7 +508,7 @@ const TripDetailsPage: React.FC = () => {
             <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
                <span className="flex items-center gap-1"><CalendarIcon className="w-4 h-4" /> {trip.start_date || 'N/A'} - {trip.end_date || 'N/A'}</span>
                <span>•</span>
-               <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {members.length} Members</span>
+               <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {Object.keys(memberStats).length} Members</span>
             </div>
           </div>
         </div>
@@ -615,6 +638,7 @@ const TripDetailsPage: React.FC = () => {
             personalTotal={personalTotal}
             budgetUsed={budgetUsed}
             isOverBudget={isOverBudget}
+            memberCount={Object.keys(memberStats).length}
           />
         )}
 
@@ -622,6 +646,7 @@ const TripDetailsPage: React.FC = () => {
           <TripExpenses 
             expenses={expenses}
             friends={friends}
+            categories={categories}
             onAddExpense={() => {
               setEditingExpense(undefined)
               setFormOpen(true)
@@ -643,6 +668,8 @@ const TripDetailsPage: React.FC = () => {
           <TripSettlements 
             memberStats={memberStats}
             settlements={settlements}
+            expenses={expenses}
+            friends={friends}
             onManageMembers={() => setMemberModalOpen(true)}
             onRemind={handleRemind}
             onSettle={handleSettleUp}
@@ -720,7 +747,7 @@ const TripDetailsPage: React.FC = () => {
 
                {/* Member List */}
                <div>
-                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Current Members ({members.length})</h4>
+                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Trip Members ({Object.keys(memberStats).length})</h4>
                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
                     {members.map(member => (
                       <div key={member.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800">

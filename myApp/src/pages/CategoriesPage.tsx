@@ -36,12 +36,12 @@ const CategoriesPage: React.FC = () => {
     const map: Record<string, number> = {}
     expenses.forEach((e) => {
       if (!e.category_id) return
-      const amt = getPersonalShare(e)
+      const amt = getPersonalShare(e, user?.id)
       if (amt <= 0) return
       map[e.category_id] = (map[e.category_id] ?? 0) + amt
     })
     return map
-  }, [expenses])
+  }, [expenses, user?.id])
 
   const getCategoryName = (categoryId: string | null) => {
     if (!categoryId) return 'Uncategorized'
@@ -431,7 +431,7 @@ const CategoriesPage: React.FC = () => {
               <span className="text-lg font-bold text-slate-200">
                 ₹
                 {selectedCategoryExpenses
-                  .reduce((sum, e) => sum + getPersonalShare(e), 0)
+                  .reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0)
                   .toFixed(2)}
               </span>
             </div>

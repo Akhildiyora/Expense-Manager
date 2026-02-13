@@ -100,7 +100,7 @@ const DashboardPage: React.FC = () => {
     })
 
     // Use your personal share for all high-level totals
-    const total = monthExpenses.reduce((sum, e) => sum + getPersonalShare(e), 0)
+    const total = monthExpenses.reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0)
 
     // Filter expenses for Pie Chart based on selection
     let pieExpenses = monthExpenses
@@ -120,7 +120,7 @@ const DashboardPage: React.FC = () => {
     if (selectedCategoryForPie === 'all') {
       // Default: Group by Main Category
       monthExpenses.forEach((e) => {
-        const amt = getPersonalShare(e)
+        const amt = getPersonalShare(e, user?.id)
         if (amt <= 0) return
         const cat = categories.find((c) => c.id === e.category_id)
         // If it has a parent, group under parent. If local, group under self.
@@ -130,7 +130,7 @@ const DashboardPage: React.FC = () => {
     } else {
       // Filtered: Group by Subcategory (Self)
       pieExpenses.forEach((e) => {
-        const amt = getPersonalShare(e)
+        const amt = getPersonalShare(e, user?.id)
         if (amt <= 0) return
         const key = e.category_id ?? 'uncategorized'
         byCategory.set(key, (byCategory.get(key) ?? 0) + amt)
@@ -142,7 +142,7 @@ const DashboardPage: React.FC = () => {
       const relevantExpenses = monthExpenses.filter((e) =>
         b.category_id ? e.category_id === b.category_id : true,
       )
-      const spent = relevantExpenses.reduce((sum, e) => sum + getPersonalShare(e), 0)
+      const spent = relevantExpenses.reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0)
       return {
         id: b.id,
         category_id: b.category_id,
@@ -177,7 +177,7 @@ const DashboardPage: React.FC = () => {
         return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth()
       })
       const monthTotal = monthExpenses.reduce(
-        (sum, e) => sum + getPersonalShare(e),
+        (sum, e) => sum + getPersonalShare(e, user?.id),
         0,
       )
       lineData.push({
@@ -189,7 +189,7 @@ const DashboardPage: React.FC = () => {
     // Categories used count should be independent of the pie chart filter
     const categoriesUsed = new Set<string>()
     monthExpenses.forEach(e => {
-      if (getPersonalShare(e) > 0) {
+      if (getPersonalShare(e, user?.id) > 0) {
         categoriesUsed.add(e.category_id ?? 'uncategorized')
       }
     })

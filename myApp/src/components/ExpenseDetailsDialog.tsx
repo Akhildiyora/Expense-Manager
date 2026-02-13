@@ -47,7 +47,7 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
 
   if (!isOpen || !expense) return null
 
-  const personalShare = getPersonalShare(expense)
+  const personalShare = getPersonalShare(expense, user?.id)
 
   const getFriendName = (id: string | null) => {
       if (!id) return 'You'

@@ -28,6 +28,7 @@ interface TripDashboardProps {
   members: TripMember[]
   expenses: Expense[]
   categories: Category[]
+  memberCount: number
   tripTotal: number
   personalTotal: number
   budgetUsed: number
@@ -37,6 +38,7 @@ interface TripDashboardProps {
 export const TripDashboard: React.FC<TripDashboardProps> = ({
   trip,
   members,
+  memberCount,
   expenses,
   categories,
   tripTotal,
@@ -117,7 +119,7 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
       <div className="flex items-center gap-3 text-sm text-slate-500">
         <span className="flex items-center gap-1"><CalendarIcon className="w-4 h-4" /> {trip.start_date || 'N/A'} - {trip.end_date || 'N/A'}</span>
         <span>•</span>
-        <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {members.length} Members</span>
+        <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {memberCount} Members</span>
       </div>
 
       {/* Overview Cards */}

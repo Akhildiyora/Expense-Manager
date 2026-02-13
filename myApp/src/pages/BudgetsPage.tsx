@@ -103,7 +103,7 @@ const BudgetsPage: React.FC = () => {
 
   expenses.forEach((e) => {
     if (e.date.startsWith(currentMonth)) {
-      const amt = getPersonalShare(e)
+      const amt = getPersonalShare(e, user?.id)
       totalMonthlySpending += amt
       if (e.category_id) {
         spendingMap.set(e.category_id, (spendingMap.get(e.category_id) ?? 0) + amt)
