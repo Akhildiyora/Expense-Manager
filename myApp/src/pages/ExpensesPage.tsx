@@ -164,24 +164,46 @@ const ExpensesPage: React.FC = () => {
     setExpenses(expenses.filter((e) => e.id !== id))
   }
 
-  const getCategoryName = (categoryId: string | null) => {
+  const getCategoryName = (expense: Expense) => {
+    const categoryId = expense.category_id
     if (!categoryId) return 'Uncategorized'
 
     const category = categories.find((c) => c.id === categoryId)
-    if (!category) return 'Unknown'
-
-    if (!category.parent_id) {
-      return category.name
+    // If we have local category with parent info, use it (Full Path)
+    if (category) {
+        if (!category.parent_id) {
+          return category.name
+        }
+    
+        const parentCategory = categories.find((c) => c.id === category.parent_id)
+        return parentCategory ? `${parentCategory.name} > ${category.name}` : category.name
     }
 
-    const parentCategory = categories.find((c) => c.id === category.parent_id)
-    return parentCategory ? `${parentCategory.name} > ${category.name}` : category.name
+    // Fallback if not found in local list (e.g. shared but RLS fetch didn't happen or not refreshed)
+    if (expense.category?.name) return expense.category.name
+
+    return 'Unknown'
   }
 
-  const getPayerName = (payerId: string | null) =>
-    payerId
-      ? friends.find((f) => f.id === payerId)?.name ?? 'Unknown'
-      : 'You'
+  const getPayerName = (expense: Expense) => {
+    // If payer_id is null, the creator (user_id) paid.
+    if (!expense.payer_id) {
+        // If I am the creator, I paid.
+        if (expense.user_id === user?.id) {
+            return user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Me'
+        }
+        // If someone else created it, they paid. Show their name.
+        return expense.profiles?.full_name || expense.profiles?.email || 'Unknown'
+    }
+
+    // If payer_id is NOT null, a friend paid.
+    // Try to get name from joined 'payer' relation (if RLS allows)
+    if (expense.payer?.name) return expense.payer.name
+
+    // Fallback: Check my local friends list (only works if friend is in my list)
+    const friend = friends.find((f) => f.id === expense.payer_id)
+    return friend?.name ?? 'Unknown'
+  }
 
   return (
     <div className="space-y-6">
@@ -333,12 +355,14 @@ const ExpensesPage: React.FC = () => {
                 )}
               </div>
               <div className="w-32 sm:w-48 shrink-0 text-slate-300 truncate">
-                {getCategoryName(e.category_id)}
+                {getCategoryName(e)}
               </div>
-              <div className="w-20 sm:w-28 shrink-0 text-slate-300 hidden sm:block truncate">{getPayerName(e.payer_id)}</div>
+              <div className="w-20 sm:w-28 shrink-0 text-slate-300 hidden sm:block truncate">{getPayerName(e)}</div>
               <div className="w-20 sm:w-24 shrink-0 text-right">
-                <div className="text-emerald-400 font-bold">₹{getPersonalShare(e, user?.id).toFixed(2)}</div>
-                {getPersonalShare(e, user?.id) !== Number(e.amount) && (
+                <div className="text-emerald-400 font-bold">
+                  ₹{((e.is_settlement && getPersonalShare(e, user?.id) === 0 && e.user_id === user?.id) ? Number(e.amount) : getPersonalShare(e, user?.id)).toFixed(2)}
+                </div>
+                {((e.is_settlement && getPersonalShare(e, user?.id) === 0 && e.user_id === user?.id) ? Number(e.amount) : getPersonalShare(e, user?.id)) !== Number(e.amount) && (
                   <div className="text-[10px] text-slate-500">of ₹{Number(e.amount).toFixed(2)}</div>
                 )}
               </div>
@@ -374,8 +398,8 @@ const ExpensesPage: React.FC = () => {
         isOpen={!!selectedExpenseId}
         onClose={() => setSelectedExpenseId(null)}
         expense={expenses.find((e) => e.id === selectedExpenseId) ?? null}
-        categoryName={selectedExpenseId ? getCategoryName(expenses.find(e => e.id === selectedExpenseId)?.category_id ?? null) : ''}
-        payerName={selectedExpenseId ? getPayerName(expenses.find(e => e.id === selectedExpenseId)?.payer_id ?? null) : ''}
+        categoryName={selectedExpenseId ? getCategoryName(expenses.find(e => e.id === selectedExpenseId)!) : ''}
+        payerName={selectedExpenseId ? getPayerName(expenses.find(e => e.id === selectedExpenseId)!) : ''}
         onEdit={(id) => {
           setSelectedExpenseId(null)
           startEdit(id)

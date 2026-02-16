@@ -6,6 +6,7 @@ interface TripSettlementsProps {
   settlements: any[]
   expenses: any[]
   friends: any[]
+  currentMemberId: string // The ID representing the current user in memberStats
   onManageMembers: () => void
   onRemind: (friendId: string, amount: number) => void
   onSettle: (friendId: string, amount: number) => void
@@ -16,6 +17,7 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
   settlements,
   expenses,
   friends,
+  currentMemberId,
   onManageMembers,
   onRemind,
   onSettle
@@ -34,7 +36,7 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
   
   // Filter out current user from potential recipients
   const potentialRecipients = Object.entries(memberStats)
-    .filter(([id]) => id !== 'user')
+    .filter(([id]) => id !== currentMemberId)
     .map(([id, stats]: [string, any]) => ({
       id,
       name: stats.name
@@ -47,10 +49,7 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }, [expenses])
 
-  const getFriendName = (id: string | null) => {
-      if (!id) return 'You'
-      return friends.find((f: any) => f.id === id)?.name || 'Unknown'
-  }
+
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -111,8 +110,8 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
             ) : (
               <ul className="space-y-3">
                 {settlements.map((s, idx) => {
-                   const payerIsMe = s.fromId === 'user'
-                   const receiverIsMe = s.toId === 'user'
+                   const payerIsMe = s.fromId === currentMemberId
+                   const receiverIsMe = s.toId === currentMemberId
 
                    return (
                   <li key={idx} className="flex items-center justify-between p-2 rounded-lg hover:bg-sky-900/20 transition group">
@@ -174,10 +173,41 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
                         
                         const payerId = exp.payer_id
                         const split = exp.expense_splits?.[0]
-                        const payeeId = split?.friend_id || null // if split is missing or friend_id null -> user
+                        const payeeId = split?.friend_id || null 
                         
-                        // If split is missing but it is a settlement? Should have a split.
+                        // Resolve names safely
+                        const payerName = payerId 
+                            ? (exp.payer?.name || friends.find((f: any) => f.id === payerId)?.name || 'Unknown')
+                            : (exp.profiles?.full_name || 'Unknown')
 
+                        // For Payee (split friend): 
+                        // The split.friend_id is an ID in the CREATOR's friend list.
+                        // Ideally we should join this too, but useExpenses might not join deep splits friends.
+                        // However, seeing as we fixed `expense_splits(*, friends!friend_id(linked_user_id))` in useExpenses.ts
+                        // We might need to check if we have the name.
+                        // Actually, `useExpenses.ts` joins `expense_splits(*, friends!friend_id(linked_user_id))`.
+                        // It does NOT join the name of the friend in the split.
+                        // But wait, `friends` table has `name`.
+                        // Let's assume we can get it or fallback to looking in our friends list (if we are the creator)
+                        // OR if we are just viewing, we might have trouble knowing the payee name if it's not joined.
+                        // BUT for Settlements, usually we know who it is.
+                        // Let's use `userName` only if it matches Us?
+                        // Actually, let's look at `TripSettlements.tsx` Line 55: `friends.find`. 
+                        // If it's a shared settlement, Payee ID is also from Creator's list.
+                        // So finding in My Friends list will fail if I am not Creator.
+                        // We need the name from the split's friend relation.
+                        
+                        // For now, let's fix Payer first as that's the reported bug.
+                        // For Payee, let's leave it or try to improve.
+                        
+                        const payeeName = payeeId
+                            ? (split?.friends?.name || friends.find((f: any) => f.id === payeeId)?.name || 'Friend')
+                            : (exp.profiles?.full_name || 'Unknown')
+                        
+                        // Wait, if payeeId is null, who is it?
+                        // In `expense_splits`, `friend_id` can be null?
+                        // If null, it usually implies the Creator?
+                        
                         return (
                             <li key={exp.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition">
                                 <div className="flex items-center gap-3">
@@ -186,9 +216,9 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-2 text-sm">
-                                            <span className="font-medium text-slate-200">{getFriendName(payerId)}</span>
+                                            <span className="font-medium text-slate-200">{payerName}</span>
                                             <span className="text-slate-500 text-xs">paid</span>
-                                            <span className="font-medium text-slate-200">{getFriendName(payeeId)}</span>
+                                            <span className="font-medium text-slate-200">{payeeName}</span>
                                         </div>
                                         <p className="text-[10px] text-slate-500">{new Date(exp.date).toLocaleDateString()}</p>
                                     </div>

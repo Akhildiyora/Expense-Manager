@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useNotifications } from '../context/NotificationContext'
 import NotificationDropdown from '../components/NotificationDropdown'
+import { ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ArrowLeftOnRectangleIcon } from '@heroicons/react/24/outline'
 
 const navItems = [
   { to: '/app', label: 'Dashboard', icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z M14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z M4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z M14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
@@ -19,7 +20,8 @@ const AppLayout: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false) // For mobile
+  const [collapsed, setCollapsed] = useState(false) // For desktop
   const [notificationOpen, setNotificationOpen] = useState(false)
 
   return (
@@ -35,14 +37,27 @@ const AppLayout: React.FC = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed md:sticky top-0 h-screen inset-y-0 left-0 z-50 w-64 border-r border-slate-800/80 bg-slate-900/95 md:bg-slate-900/80 flex flex-col shrink-0 transition-transform duration-200 ease-out ${
+        className={`fixed md:sticky top-0 h-screen inset-y-0 left-0 z-50 border-r border-slate-800/80 bg-slate-900/95 md:bg-slate-900/80 flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}
+        } w-64 ${collapsed ? 'md:w-20' : ''}`}
       >
-          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between shrink-0 h-16">
-            <div>
-              <h1 className="text-lg font-bold tracking-tight text-slate-50">Expense Tracker</h1>
+          <div className={`p-4 border-b border-slate-800/80 flex items-center shrink-0 h-16 ${collapsed ? 'md:justify-center' : 'justify-between'}`}>
+            <div className={`overflow-hidden whitespace-nowrap ${collapsed ? 'md:hidden' : ''}`}>
+              <h1 className="text-lg font-bold tracking-tight text-slate-50 animate-in fade-in duration-300">Expense Tracker</h1>
             </div>
+
+             {/* Collapse Toggle (Desktop) */}
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? (
+                <ChevronDoubleRightIcon className="w-5 h-5" />
+              ) : (
+                <ChevronDoubleLeftIcon className="w-5 h-5" />
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
@@ -52,7 +67,8 @@ const AppLayout: React.FC = () => {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto custom-scrollbar">
+
+          <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -60,32 +76,48 @@ const AppLayout: React.FC = () => {
                 end={item.to === '/app'}
                 onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                  `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 group relative ${
                     isActive
                       ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 border border-transparent'
-                  }`
+                  } ${collapsed ? 'md:justify-center' : ''}`
                 }
+                title={collapsed ? item.label : ''}
               >
                 <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                   <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
                 </svg>
-                {item.label}
+                <span className={`whitespace-nowrap animate-in fade-in slide-in-from-left-2 duration-200 ${collapsed ? 'md:hidden' : ''}`}>
+                    {item.label}
+                </span>
+                 {/* Tooltip for collapsed state if needed, relying on title attribute for simplicity now */}
               </NavLink>
             ))}
           </nav>
+
           <div className="p-3 border-t border-slate-800/80 shrink-0">
-            <div className="rounded-xl bg-slate-800/60 p-3">
-              <NavLink to="/app/profile" className="block text-xs text-slate-400 truncate mb-2 hover:text-emerald-400 transition">
-                {user?.email}
-              </NavLink>
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="w-full text-left text-xs font-medium text-slate-400 hover:text-emerald-400 transition"
-              >
-                Log out
-              </button>
+            <div className={`rounded-xl bg-slate-800/60 p-3 transition-all duration-300 flex flex-col ${collapsed ? 'md:items-center' : ''}`}>
+                <div className={`w-full ${collapsed ? 'md:hidden' : ''}`}>
+                    <NavLink to="/app/profile" className="block text-xs text-slate-400 truncate mb-2 hover:text-emerald-400 transition">
+                        {user?.email}
+                    </NavLink>
+                    <button
+                        type="button"
+                        onClick={() => void signOut()}
+                        className="w-full text-left text-xs font-medium text-slate-400 hover:text-emerald-400 transition flex items-center gap-2"
+                    >
+                        <ArrowLeftOnRectangleIcon className="w-4 h-4" />
+                        Log out
+                    </button>
+                </div>
+                 <button
+                    type="button"
+                    onClick={() => void signOut()}
+                    className={`p-2 text-slate-400 hover:text-emerald-400 transition hidden ${collapsed ? 'md:block' : ''}`}
+                    title="Log out"
+                 >
+                    <ArrowLeftOnRectangleIcon className="w-5 h-5" />
+                 </button>
             </div>
           </div>
         </aside>

@@ -15,6 +15,7 @@ import { PieChartDialog } from '../ChartDialogs'
 import type { Trip } from '../../queries/useTrips'
 import type { Category } from '../../queries/useCategories'
 import type { Expense } from '../../queries/useExpenses'
+
 type TripMember = {
   friend_id: string
   friends: {
@@ -33,6 +34,7 @@ interface TripDashboardProps {
   personalTotal: number
   budgetUsed: number
   isOverBudget: boolean
+  userName: string
 }
 
 export const TripDashboard: React.FC<TripDashboardProps> = ({
@@ -44,7 +46,8 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
   tripTotal,
   personalTotal,
   budgetUsed,
-  isOverBudget
+  isOverBudget,
+  userName
 }) => {
   const [pieDialogOpen, setPieDialogOpen] = useState(false)
   
@@ -103,8 +106,8 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
     const payerMap = new Map<string, number>()
     expenses.forEach(e => {
       const payerName = e.payer_id 
-        ? (members.find(m => m.friend_id === e.payer_id)?.friends?.name || 'Unknown') 
-        : 'You'
+        ? (e.payer?.name || members.find(m => m.friend_id === e.payer_id)?.friends?.name || 'Unknown') 
+        : (e.profiles?.full_name || 'Unknown')
       payerMap.set(payerName, (payerMap.get(payerName) || 0) + Number(e.amount))
     })
 
@@ -129,7 +132,7 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
           <p className="text-2xl font-bold text-slate-100">₹{tripTotal.toLocaleString()}</p>
         </div>
         <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-2">Your Share</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-2">{userName}'s Share</p>
           <p className="text-2xl font-bold text-emerald-400">₹{personalTotal.toLocaleString()}</p>
         </div>
         <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl relative overflow-hidden">

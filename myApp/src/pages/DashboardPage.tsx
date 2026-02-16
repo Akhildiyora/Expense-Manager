@@ -79,9 +79,25 @@ const DashboardPage: React.FC = () => {
     void fetchSplits()
   }, [user])
 
+  // Create a fallback map of category names from loaded expenses
+  const expenseCategoryMap = useMemo(() => {
+    const map = new Map<string, string>()
+    expenses.forEach(e => {
+        if (e.category_id && e.category?.name) {
+            map.set(e.category_id, e.category.name)
+        }
+    })
+    return map
+  }, [expenses])
+
   const getCategoryName = (categoryId: string | null) => {
     if (!categoryId) return 'Uncategorized'
-    return categories.find((c) => c.id === categoryId)?.name ?? 'Unknown'
+    // Try local list first (for hierarchy)
+    const cat = categories.find((c) => c.id === categoryId)
+    if (cat) return cat.name
+    
+    // Fallback to expense data
+    return expenseCategoryMap.get(categoryId) ?? 'Unknown'
   }
 
   const [selectedCategoryForPie, setSelectedCategoryForPie] = useState<string>('all')
@@ -254,13 +270,13 @@ const DashboardPage: React.FC = () => {
           <p className="text-xs text-slate-400">Splits summary</p>
           <div className="mt-2 flex items-baseline gap-6">
             <div>
-              <p className="text-[11px] text-slate-400">Friends owe you</p>
+              <p className="text-[11px] text-slate-400">Friends owe {user?.user_metadata?.full_name?.split(' ')[0] || 'Me'}</p>
               <p className="text-xl font-semibold text-emerald-300">
                 ₹{splitSummary.owedToYou.toFixed(2)}
               </p>
             </div>
             <div>
-              <p className="text-[11px] text-slate-400">You owe friends</p>
+              <p className="text-[11px] text-slate-400">{user?.user_metadata?.full_name?.split(' ')[0] || 'Me'} owe friends</p>
               <p className="text-xl font-semibold text-amber-300">
                 ₹{splitSummary.youOwe.toFixed(2)}
               </p>

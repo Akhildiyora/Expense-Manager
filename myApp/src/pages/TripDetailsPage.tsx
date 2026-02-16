@@ -28,6 +28,7 @@ import { TripDashboard } from '../components/trip/TripDashboard'
 import { TripExpenses } from '../components/trip/TripExpenses'
 import { TripAnalysis } from '../components/trip/TripAnalysis'
 import { TripSettlements } from '../components/trip/TripSettlements'
+import { MemberPermissionsDialog } from '../components/trip/MemberPermissionsDialog'
 
 type Tab = 'dashboard' | 'expenses' | 'analysis' | 'settlements'
 
@@ -46,6 +47,7 @@ const TripDetailsPage: React.FC = () => {
     user_id: string | null
     email: string | null
     role: 'admin' | 'viewer' | 'editor' | 'owner'
+    can_add_expenses?: boolean
     friends: { name: string; email?: string } | null
   }
 
@@ -55,6 +57,8 @@ const TripDetailsPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
   const [memberModalOpen, setMemberModalOpen] = useState(false)
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false)
+  const [selectedMember, setSelectedMember] = useState<TripMember | null>(null)
   const [savingMembers, setSavingMembers] = useState(false)
   
   // New Invite State
@@ -73,6 +77,8 @@ const TripDetailsPage: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null)
 
   // Derived User Role
+  const currentUserName = useMemo(() => user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Me', [user])
+
   const currentUserRole = useMemo(() => {
     if (!trip || !user) return 'viewer'
     if (trip.user_id === user.id) return 'owner'
@@ -87,8 +93,25 @@ const TripDetailsPage: React.FC = () => {
     setPortalTarget(document.getElementById('trip-header-portal'))
   }, [])
   
-  const canEditTrip = currentUserRole === 'owner' || currentUserRole === 'editor' || currentUserRole === 'admin'
-  const canAddExpense = canEditTrip //For now admins/editors can add. Viewers cannot.
+  // Granular Permissions
+  const permissions = useMemo(() => {
+    const role = currentUserRole
+    const membership = members.find(m => m.user_id === user?.id || m.email === user?.email)
+    
+    return {
+      canAddMembers: role === 'owner' || role === 'admin',
+      canRemoveMembers: role === 'owner' || role === 'admin',
+      canAddExpenses: role === 'owner' || role === 'admin' || role === 'editor' || membership?.can_add_expenses === true,
+      canEditExpenses: role === 'owner' || role === 'admin',
+      canDeleteExpenses: role === 'owner' || role === 'admin',
+      canManagePermissions: role === 'owner' || role === 'admin',
+      canEditTrip: role === 'owner',
+      isOwner: role === 'owner',
+      isAdmin: role === 'admin',
+      isEditor: role === 'editor',
+      isViewer: role === 'viewer'
+    }
+  }, [currentUserRole, members, user?.id, user?.email])
 
   const fetchTripData = async () => {
     if (!id || !user) return
@@ -115,7 +138,7 @@ const TripDetailsPage: React.FC = () => {
       // Fetch Expenses
       const { data: expData, error: expErr } = await supabase
         .from('expenses')
-        .select('*, expense_splits(*), is_settlement')
+        .select('*, expense_splits(*), is_settlement, profiles:user_id(full_name), payer:payer_id(name)')
         .eq('trip_id', id)
         .order('date', { ascending: false })
       if (expErr) throw expErr
@@ -379,67 +402,137 @@ const TripDetailsPage: React.FC = () => {
   const personalTotal = useMemo(() => expenses.reduce((sum, e) => sum + getPersonalShare(e, user?.id), 0), [expenses, user?.id])
 
   const memberStats = useMemo(() => {
+    if (!trip) return {} // Fix for crash
     const stats: Record<string, { name: string; paid: number; share: number; balance: number }> = {}
-    
-    // User stats
-    stats['user'] = { name: 'You', paid: 0, share: 0, balance: 0 }
+    const userToCanonicalId: Record<string, string> = {}
+    const emailToCanonicalId: Record<string, string> = {}
 
-    // Initialize with known trip members
+    // 1. Initialize stats for all known unique trip members (from Creator's perspective)
     members.forEach(m => {
-      stats[m.friend_id] = { name: m.friends?.name || 'Unknown', paid: 0, share: 0, balance: 0 }
+        // Use friend_id as the stable Canonical ID.
+        // If a member has no friend_id (e.g. self-added Owner without friend record?), use their user_id.
+        const canonicalId = m.friend_id || m.user_id || m.email || 'unknown_member'
+        
+        let name = m.friends?.name || 'Unknown Member'
+        if (m.user_id === user?.id) name = currentUserName // Display "Me" for myself if found
+        
+        if (!stats[canonicalId]) {
+            stats[canonicalId] = { name, paid: 0, share: 0, balance: 0 }
+        }
+
+        // Map User IDs and Emails to this Canonical ID
+        if (m.user_id) userToCanonicalId[m.user_id] = canonicalId
+        if (m.email) emailToCanonicalId[m.email] = canonicalId
     })
 
-    // Helper to ensure stats entry exists
-    const ensureStat = (id: string) => {
-        if (!stats[id]) {
-            const friend = friends.find(f => f.id === id)
-            stats[id] = { name: friend?.name || 'Unknown', paid: 0, share: 0, balance: 0 }
+    // Helper: Identify the Trip Owner (Creator)
+    const ownerId = trip.user_id
+    if (!userToCanonicalId[ownerId]) {
+        if (!stats[ownerId]) {
+            stats[ownerId] = { name: (user?.id === ownerId ? currentUserName : 'Trip Owner'), paid: 0, share: 0, balance: 0 }
         }
+        userToCanonicalId[ownerId] = ownerId
+    }
+
+    // Lookup Helper
+    const getCanonicalId = (userId: string | null, friendId: string | null) => {
+        // 1. Direct Friend ID
+        if (friendId && stats[friendId]) return friendId
+        // 2. User ID Mapping
+        if (userId && userToCanonicalId[userId]) return userToCanonicalId[userId]
+        
+        // 3. Fallbacks
+        return friendId || userId || 'unknown'
     }
 
     expenses.forEach(e => {
       const amount = Number(e.amount)
       let totalSplitAmount = 0
       
-      // Determine payer key and ensure they exist in stats
-      const payerKey = e.payer_id === null ? 'user' : e.payer_id
-      if (payerKey !== 'user') {
-        ensureStat(payerKey)
+      // Resolve Payer
+      const payerIdRaw = e.payer_id 
+      const payerUserId = e.user_id // Creator of expense
+      
+      let payerCanonicalId: string
+      
+      if (payerIdRaw) {
+          payerCanonicalId = getCanonicalId(null, payerIdRaw)
+      } else {
+          payerCanonicalId = getCanonicalId(payerUserId, null)
+      }
+
+      // Ensure stats entry (fix for "External User" if name available from profile join)
+      if (!stats[payerCanonicalId]) {
+          let fallbackName = 'External User'
+          if (payerCanonicalId === user?.id) fallbackName = currentUserName
+          else if (e.profiles?.full_name && payerCanonicalId === e.user_id) fallbackName = e.profiles.full_name // Owner name from join
+          
+          stats[payerCanonicalId] = { name: fallbackName, paid: 0, share: 0, balance: 0 }
+      } else {
+         // Update name if it was generic "Trip Owner" and we have better one
+         if (stats[payerCanonicalId].name === 'Trip Owner' && e.profiles?.full_name && payerCanonicalId === e.user_id) {
+             stats[payerCanonicalId].name = e.profiles.full_name
+         }
       }
       
-      // Credit payment to payer
-      stats[payerKey].paid += amount
+      stats[payerCanonicalId].paid += amount
 
-      // Process splits to calculate shares
+      // Process Splits
       const splits = e.expense_splits || []
-      
       splits.forEach((s: { friend_id: string | null; share_amount: number }) => {
         const share = Number(s.share_amount)
         totalSplitAmount += share
         
-        if (s.friend_id === null) {
-          stats['user'].share += share
+        // Resolve Split Member
+        let splitCanonicalId: string
+        if (s.friend_id) {
+            splitCanonicalId = getCanonicalId(null, s.friend_id)
         } else {
-          ensureStat(s.friend_id)
-          stats[s.friend_id].share += share
+            splitCanonicalId = getCanonicalId(e.user_id, null)
         }
+        
+        if (!stats[splitCanonicalId]) {
+            let fallbackName = 'Unknown Member'
+            if (splitCanonicalId === user?.id) fallbackName = currentUserName
+            stats[splitCanonicalId] = { name: fallbackName, paid: 0, share: 0, balance: 0 }
+        }
+        
+        stats[splitCanonicalId].share += share
       })
 
-      // Assign remaining amount to payer as their share
-      // This handles cases where payer is not explicitly in splits or splits are incomplete (implied payer share)
+      // Assign Remainder
       const remainder = amount - totalSplitAmount
-      if (remainder > 0.05) { // Small epsilon for float logic
-        stats[payerKey].share += remainder
+      if (remainder > 0.05) { 
+        stats[payerCanonicalId].share += remainder
       }
     })
 
-    // Final balance calculation
+    // Final Balances
     Object.keys(stats).forEach(id => {
       stats[id].balance = stats[id].paid - stats[id].share
     })
+    
+    // Remove purely empty entries if any (optional cleanup)
+    // delete stats['unknown']
 
     return stats
-  }, [members, expenses, friends])
+  }, [members, expenses, user, currentUserName, trip])
+
+  const currentMemberId = useMemo(() => {
+     if (!trip) return 'unknown_me' // Fix for crash
+
+     // 1. Try to find explicit member row
+     const memberRow = members.find(m => m.user_id === user?.id)
+     if (memberRow?.friend_id) return memberRow.friend_id
+     
+     // 2. If no friend_id but user_id matches, return user_id (if logic above used it)
+     if (memberRow?.user_id) return memberRow.user_id
+     
+     // 3. If I am the Owner, and no row found, return ownerId (trip.user_id)
+     if (user?.id === trip.user_id) return trip.user_id
+     
+     return 'unknown_me'
+  }, [members, user?.id, trip])
 
   const settlements = useMemo(() => {
     const participants = Object.entries(memberStats).map(([id, s]) => ({
@@ -519,7 +612,7 @@ const TripDetailsPage: React.FC = () => {
       {/* Portal to AppLayout Header */}
       {portalTarget && createPortal(
         <div className="flex items-center gap-3">
-          {canAddExpense && (
+          {permissions.canAddExpenses && (
             <>
               <button
                 onClick={() => {
@@ -639,6 +732,7 @@ const TripDetailsPage: React.FC = () => {
             budgetUsed={budgetUsed}
             isOverBudget={isOverBudget}
             memberCount={Object.keys(memberStats).length}
+            userName={currentUserName}
           />
         )}
 
@@ -652,7 +746,7 @@ const TripDetailsPage: React.FC = () => {
               setFormOpen(true)
             }}
             onSelectExpense={setSelectedExpenseId}
-            canAdd={canAddExpense}
+            canAdd={permissions.canAddExpenses}
           />
         )}
 
@@ -670,6 +764,7 @@ const TripDetailsPage: React.FC = () => {
             settlements={settlements}
             expenses={expenses}
             friends={friends}
+            currentMemberId={currentMemberId}
             onManageMembers={() => setMemberModalOpen(true)}
             onRemind={handleRemind}
             onSettle={handleSettleUp}
@@ -682,7 +777,8 @@ const TripDetailsPage: React.FC = () => {
         onClose={() => setSelectedExpenseId(null)}
         expense={expenses.find(e => e.id === selectedExpenseId) || null}
         categoryName={selectedExpenseId ? (categories.find(c => c.id === expenses.find(e => e.id === selectedExpenseId)?.category_id)?.name || 'Uncategorized') : ''}
-        payerName={selectedExpenseId ? (expenses.find(e => e.id === selectedExpenseId)?.payer_id ? friends.find(f => f.id === expenses.find(e => e.id === selectedExpenseId)?.payer_id)?.name || 'Friend' : 'You') : ''}
+        payerName={selectedExpenseId ? (expenses.find(e => e.id === selectedExpenseId)?.payer_id ? friends.find(f => f.id === expenses.find(e => e.id === selectedExpenseId)?.payer_id)?.name || 'Friend' : (currentUserName)) : ''}
+        userName={currentUserName}
         onEdit={(id) => {
           setSelectedExpenseId(null)
           startEdit(id)
@@ -706,7 +802,7 @@ const TripDetailsPage: React.FC = () => {
             
             <div className="p-6 space-y-6">
                {/* Invite Section */}
-               {canEditTrip && (
+               {permissions.canEditTrip && (
                  <div className="bg-slate-800/50 p-4 rounded-xl space-y-3">
                    <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Invite New Member</h4>
                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -749,38 +845,84 @@ const TripDetailsPage: React.FC = () => {
                <div>
                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Trip Members ({Object.keys(memberStats).length})</h4>
                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                    {members.map(member => (
+                    {members.map(member => {
+                      const isMe = member.user_id === user?.id
+                      const memberName = isMe ? currentUserName : (member.friends?.name || 'Unknown')
+
+                      return (
                       <div key={member.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800">
                         <div className="flex items-center gap-3">
                            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">
-                              {(member.friends?.name || 'U').charAt(0).toUpperCase()}
+                              {memberName.charAt(0).toUpperCase()}
                            </div>
                            <div>
-                             <div className="text-sm font-medium text-slate-200">{member.friends?.name || 'Unknown'}</div>
+                             <div className="text-sm font-medium text-slate-200 flex items-center gap-2">
+                               {memberName}
+                               {member.can_add_expenses && member.role === 'viewer' && (
+                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold" title="Can add expenses">
+                                   +EXPENSE
+                                 </span>
+                               )}
+                             </div>
                              <div className="text-[10px] text-slate-500 flex items-center gap-2">
                                {member.email}
-                               <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${member.role === 'admin' || member.role === 'owner' ? 'bg-purple-500/10 text-purple-400' : 'bg-slate-700 text-slate-400'}`}>
+                               <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                 member.role === 'admin' ? 'bg-purple-500/10 text-purple-400' : 
+                                 member.role === 'editor' ? 'bg-sky-500/10 text-sky-400' :
+                                 'bg-slate-700 text-slate-400'
+                               }`}>
                                  {member.role || 'viewer'}
                                </span>
                              </div>
                            </div>
                         </div>
-                        {canEditTrip && member.user_id !== user?.id && (
-                          <button 
-                            onClick={() => removeMember(member.id)}
-                            className="text-red-400 hover:bg-red-500/10 p-1.5 rounded-lg transition"
-                            title="Remove Member"
-                          >
-                            &times;
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {permissions.canManagePermissions && !isMe && (
+                            <button 
+                              onClick={() => {
+                                setSelectedMember(member)
+                                setPermissionsDialogOpen(true)
+                              }}
+                              className="text-sky-400 hover:bg-sky-500/10 px-2 py-1 rounded text-[10px] font-semibold transition"
+                              title="Manage Permissions"
+                            >
+                              Manage
+                            </button>
+                          )}
+                          {permissions.canRemoveMembers && member.user_id !== user?.id && (
+                            <button 
+                              onClick={() => removeMember(member.id)}
+                              className="text-red-400 hover:bg-red-500/10 p-1.5 rounded-lg transition"
+                              title="Remove Member"
+                            >
+                              &times;
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                      )
+                    })}
                  </div>
                </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Member Permissions Dialog */}
+      {selectedMember && (
+        <MemberPermissionsDialog
+          isOpen={permissionsDialogOpen}
+          onClose={() => {
+            setPermissionsDialogOpen(false)
+            setSelectedMember(null)
+          }}
+          member={selectedMember}
+          currentUserRole={currentUserRole}
+          onUpdate={async () => {
+            await fetchTripData()
+          }}
+        />
       )}
 
       {formOpen && (

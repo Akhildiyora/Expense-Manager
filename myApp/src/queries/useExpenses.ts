@@ -15,12 +15,16 @@ export type Expense = {
   payer_id: string | null
   trip_id: string | null
   payment_mode: 'cash' | 'online' | 'card' | null
+  is_settlement: boolean
   expense_splits: {
     friend_id: string | null
     owed_to_friend_id: string | null
     share_amount: number
-    friends?: { linked_user_id: string | null } | null
+    friends?: { linked_user_id: string | null; name: string } | null
   }[]
+  profiles?: { full_name: string | null; email: string | null }
+  payer?: { name: string } | null
+  category?: { name: string } | null
 }
 
 type ExpenseFilters = {
@@ -52,7 +56,13 @@ export const useExpenses = (filters: ExpenseFilters = {}) => {
       setError(null)
       let query = supabase
         .from('expenses')
-        .select('*, expense_splits(*, friends!friend_id(linked_user_id))')
+        .select(`
+          *, 
+          expense_splits(*, friends!friend_id(linked_user_id, name)),
+          profiles:user_id(full_name, email),
+          payer:friends!payer_id(name),
+          category:categories!category_id(name)
+        `)
 
       // Apply Filters
       if (filters.fromDate) {

@@ -13,7 +13,6 @@ interface TripExpensesProps {
 
 export const TripExpenses: React.FC<TripExpensesProps> = ({
   expenses,
-  friends,
   categories,
   onAddExpense,
   onSelectExpense,
@@ -184,7 +183,7 @@ export const TripExpenses: React.FC<TripExpensesProps> = ({
                         )}
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Paid by {exp.payer_id ? friends.find((f: any) => f.id === exp.payer_id)?.name || 'Friend' : 'You'}
+                      Paid by {exp.payer_id ? (exp.payer?.name || 'Friend') : (exp.profiles?.full_name || 'Unknown')}
                     </p>
                   </div>
                 </div>

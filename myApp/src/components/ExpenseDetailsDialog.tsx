@@ -13,6 +13,7 @@ interface ExpenseDetailsDialogProps {
   expense: any | null // Using any for now matching the raw expense object structure, or define a type
   categoryName: string
   payerName: string
+  userName?: string
   onEdit?: (id: string) => void
   onDelete?: (id: string) => void
 }
@@ -29,6 +30,7 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
   expense,
   categoryName,
   payerName,
+  userName,
   onEdit,
   onDelete,
 }) => {
@@ -48,17 +50,18 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
   if (!isOpen || !expense) return null
 
   const personalShare = getPersonalShare(expense, user?.id)
+  const currentUserName = userName || user?.user_metadata?.full_name?.split(' ')[0] || 'Me'
 
   const getFriendName = (id: string | null) => {
-      if (!id) return 'You'
-      if (id === user?.id) return 'You'
+      if (!id) return currentUserName
+      if (id === user?.id) return currentUserName
       const f = friends.find(friend => friend.id === id)
       return f ? f.name : 'Unknown'
   }
 
   // Helper to interpret the split row
   const renderSplitRow = (split: SplitDetail) => {
-    const debtorName = split.friend_id ? getFriendName(split.friend_id) : 'You'
+    const debtorName = split.friend_id ? getFriendName(split.friend_id) : currentUserName
     
     return (
         <div key={`${split.friend_id}-${split.owed_to_friend_id}`} className="flex justify-between items-center text-xs py-1">
@@ -98,7 +101,7 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
                {expense.currency}
              </span>
              <span className="text-xs text-emerald-300 mt-2">
-               Your share: ₹{personalShare.toFixed(2)}
+               {currentUserName}'s share: ₹{personalShare.toFixed(2)}
              </span>
           </div>
 

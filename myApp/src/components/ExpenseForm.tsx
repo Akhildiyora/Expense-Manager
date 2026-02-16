@@ -50,6 +50,7 @@ export const ExpenseForm: React.FC<ExpenseFormProps> = ({
   const { friends } = useFriends()
   const { trips } = useTrips()
   const { user } = useAuth()
+  const userName = user?.user_metadata?.full_name?.split(' ')[0] || 'Me'
 
   const [form, setForm] = useState<ExpenseFormState>(initialData || { ...emptyForm(), trip_id: tripId || null })
   const [saving, setSaving] = useState(false)
@@ -340,7 +341,7 @@ export const ExpenseForm: React.FC<ExpenseFormProps> = ({
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                     }`}
                 >
-                    You
+                    {userName}
                 </button>
                 {friends.map((friend) => (
                     <button
@@ -371,7 +372,7 @@ export const ExpenseForm: React.FC<ExpenseFormProps> = ({
                   value={form.payerId}
                   onChange={(val) => setForm(f => ({ ...f, payerId: val }))}
                   options={[
-                    { value: 'you', label: 'You' },
+                    { value: 'you', label: userName },
                     ...form.friendIds.map((id) => {
                       const friend = friends.find((f) => f.id === id)
                       return { value: id, label: friend?.name || 'Unknown' }
