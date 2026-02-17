@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { CalendarIcon, UserGroupIcon } from '@heroicons/react/24/outline'
+
 import {
   BarChart as RechartsBarChart,
   Bar,
@@ -41,7 +41,7 @@ interface TripDashboardProps {
 export const TripDashboard: React.FC<TripDashboardProps> = ({
   trip,
   members,
-  memberCount,
+
   expenses,
   categories,
   tripTotal,
@@ -49,7 +49,7 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
   budgetUsed,
   isOverBudget,
   userName,
-  onViewMembers
+
 }) => {
   const [pieDialogOpen, setPieDialogOpen] = useState(false)
   

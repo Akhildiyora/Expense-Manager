@@ -1,9 +1,8 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { 
+import {
   UserPlusIcon, 
   XMarkIcon,
-  ShieldCheckIcon,
   UserIcon
 } from '@heroicons/react/24/outline'
 
