@@ -1,1 +1,12 @@
-{}
+{
+    "name": "root",
+    "private": true,
+    "scripts": {
+        "dev": "npm run dev --prefix myApp",
+        "build": "npm run build --prefix myApp && echo 'Build complete for myApp'",
+        "lint": "npm run lint --prefix myApp",
+        "preview": "npm run preview --prefix myApp",
+        "backend:dev": "npm run dev --prefix backend",
+        "backend:build": "npm run build --prefix backend"
+    }
+}
