@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useAuth } from '../auth/AuthContext'
 import { useFriends } from '../queries/useFriends'
@@ -13,8 +13,7 @@ import {
   Squares2X2Icon,
   QueueListIcon,
   ChartPieIcon,
-  BanknotesIcon,
-  BellIcon // Added
+  BanknotesIcon
 } from '@heroicons/react/24/outline'
 import { ExpenseDetailsDialog } from '../components/ExpenseDetailsDialog'
 import { getPersonalShare } from '../utils/expenseShare'
@@ -29,6 +28,7 @@ import { TripExpenses } from '../components/trip/TripExpenses'
 import { TripAnalysis } from '../components/trip/TripAnalysis'
 import { TripSettlements } from '../components/trip/TripSettlements'
 import { MemberPermissionsDialog } from '../components/trip/MemberPermissionsDialog'
+import { TripMembersDialog } from '../components/trip/TripMembersDialog'
 
 type Tab = 'dashboard' | 'expenses' | 'analysis' | 'settlements'
 
@@ -59,22 +59,32 @@ const TripDetailsPage: React.FC = () => {
   const [memberModalOpen, setMemberModalOpen] = useState(false)
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false)
   const [selectedMember, setSelectedMember] = useState<TripMember | null>(null)
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false)
   const [savingMembers, setSavingMembers] = useState(false)
   
   // New Invite State
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteName, setInviteName] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'viewer'>('viewer')
+  
+  // Friend Sync State
+  const [pendingFriendAdd, setPendingFriendAdd] = useState<{name: string; email: string; linked_user_id: string | null} | null>(null)
 
-  const { notifications, unreadCount, markAsRead } = useNotifications()
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const { 
+    // notifications, 
+    // markAsRead, 
+    // unreadCount, 
+    // setNotificationsOpen 
+    // All handled globally now
+   } = useNotifications()
+  // const [notificationsOpen, setNotificationsOpen] = useState(false)
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
 
   // Expense Form State
   const [formOpen, setFormOpen] = useState(false)
   const [editingExpense, setEditingExpense] = useState<ExpenseFormState | undefined>(undefined)
-  const [formError, setFormError] = useState<string | null>(null)
+
 
   // Derived User Role
   const currentUserName = useMemo(() => user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Me', [user])
@@ -138,7 +148,7 @@ const TripDetailsPage: React.FC = () => {
       // Fetch Expenses
       const { data: expData, error: expErr } = await supabase
         .from('expenses')
-        .select('*, expense_splits(*), is_settlement, profiles:user_id(full_name), payer:payer_id(name)')
+        .select('*, expense_splits(*, friend_debtor:friends!friend_id(linked_user_id, name), friend_creditor:friends!owed_to_friend_id(linked_user_id, name)), is_settlement, profiles:user_id(full_name), payer:payer_id(name)')
         .eq('trip_id', id)
         .order('date', { ascending: false })
       if (expErr) throw expErr
@@ -155,6 +165,36 @@ const TripDetailsPage: React.FC = () => {
     void fetchTripData()
   }, [id, user])
 
+  // Handle URL query params for deep linking
+  const location = useLocation()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const viewId = params.get('viewExpense')
+    const searchTitle = params.get('searchExpense')
+    
+    if (expenses.length > 0) {
+        let exp: any = null
+        
+        if (viewId) {
+            exp = expenses.find(e => e.id === viewId)
+        } else if (searchTitle) {
+            // Fuzzy match by title
+            const decodedTitle = decodeURIComponent(searchTitle)
+            exp = expenses.find(e => e.title === decodedTitle || e.title.includes(decodedTitle))
+        }
+
+        if (exp) {
+            setViewExpense(exp)
+            setDetailsOpen(true)
+            // Clear params to avoid loop
+            const newParams = new URLSearchParams(location.search)
+            newParams.delete('viewExpense')
+            newParams.delete('searchExpense')
+            navigate(`${location.pathname}?${newParams.toString()}`, { replace: true })
+        }
+    }
+  }, [location.search, expenses])
+
   const handleInviteMember = async () => {
     if (!id || !user || !inviteEmail) return
     setSavingMembers(true)
@@ -162,38 +202,50 @@ const TripDetailsPage: React.FC = () => {
       // 1. Check if friend exists with this email (or name matching email)
       // Since 'friends' table is user-specific, we check only our friends.
       let friendId: string | null = null
+      let linkedUserId: string | null = null
       
       const { data: existingFriend } = await supabase
         .from('friends')
-        .select('id')
+        .select('id, linked_user_id')
         .eq('email', inviteEmail)
         .eq('user_id', user.id)
         .single()
 
       if (existingFriend) {
         friendId = existingFriend.id
+        linkedUserId = existingFriend.linked_user_id
       } else {
+        // Check if this email belongs to a registered user
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', inviteEmail)
+          .single()
+
         // Create new friend
         const { data: newFriend, error: createErr } = await supabase
           .from('friends')
           .insert({
             user_id: user.id,
             name: inviteName || inviteEmail.split('@')[0],
-            email: inviteEmail
+            email: inviteEmail,
+            linked_user_id: existingProfile?.id || null
           })
           .select()
           .single()
         
         if (createErr) throw createErr
         friendId = newFriend.id
+        linkedUserId = existingProfile?.id || null
       }
 
-      // 2. Add to trip_members
+      // 2. Add to trip_members with user_id if available
       const { error: inviteErr } = await supabase
         .from('trip_members')
         .insert({
           trip_id: id,
           friend_id: friendId,
+          user_id: linkedUserId, // Populate user_id immediately if available
           email: inviteEmail,
           role: inviteRole
         })
@@ -202,6 +254,23 @@ const TripDetailsPage: React.FC = () => {
         if (inviteErr.code === '23505') alert('This member is already in the trip.')
         else throw inviteErr
       } else {
+        // Success! Check if we should prompt to add to friends list
+        if (linkedUserId && inviteEmail) {
+          // Check if already in friends list
+          const alreadyFriend = friends.some(f => 
+            f.email === inviteEmail || f.linked_user_id === linkedUserId
+          )
+          
+          if (!alreadyFriend) {
+            // Prompt user to add to friends
+            setPendingFriendAdd({
+              name: inviteName || inviteEmail.split('@')[0],
+              email: inviteEmail,
+              linked_user_id: linkedUserId
+            })
+          }
+        }
+        
         setInviteEmail('')
         setInviteName('')
         await fetchTripData()
@@ -213,11 +282,119 @@ const TripDetailsPage: React.FC = () => {
     }
   }
 
+  const handleAddToFriends = async () => {
+    if (!pendingFriendAdd || !user) return
+    
+    try {
+      const { error } = await supabase.rpc('add_friend_with_email', {
+        p_name: pendingFriendAdd.name,
+        p_email: pendingFriendAdd.email
+      })
+      
+      if (error) throw error
+      
+      // Success! Close dialog
+      setPendingFriendAdd(null)
+      // Could show a success toast here
+    } catch (err: any) {
+      alert('Failed to add to friends: ' + err.message)
+    }
+  }
+
   /* eslint-disable @typescript-eslint/no-unused-vars */
   const removeMember = async (memberId: string) => {
     if (!confirm('Remove this member?')) return
     await supabase.from('trip_members').delete().eq('id', memberId)
     await fetchTripData()
+  }
+
+  // Details Dialog State
+  const [viewExpense, setViewExpense] = useState<any | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+
+
+  const handleBulkAddToFriends = async () => {
+    if (!user) return
+    
+    // Get all trip members who:
+    // 1. Are not the current user
+    // 2. Are NOT already in the friends list (check by email OR linked_user_id)
+    const membersToAdd = members.filter(m => {
+      if (m.user_id === user.id) return false
+      
+      // Determine effective name
+      // const name = m.friends?.name || m.email?.split('@')[0] || 'Unknown'
+      
+      // Check if already a friend
+      // If member has linked_user_id, check against that
+      // If member has email, check against that
+      // If member has neither (just a name), we might duplicate if we just check name. 
+      // User requested "don't make any condition... just add them"
+      // But we should try to avoid obvious duplicates.
+      
+      const alreadyFriend = friends.some(f => {
+        if (m.user_id && f.linked_user_id === m.user_id) return true
+        if (m.email && f.email === m.email) return true
+        return false 
+      })
+      
+      return !alreadyFriend
+    })
+    
+    if (membersToAdd.length === 0) {
+      alert('All eligible trip members are already in your friends list!')
+      return
+    }
+    
+    if (!confirm(`Add ${membersToAdd.length} trip member(s) to your friends list?`)) return
+    
+    try {
+      let successCount = 0
+      
+      // We process sequentially to handle different types of adds
+      for (const member of membersToAdd) {
+        const name = member.friends?.name || member.email?.split('@')[0] || 'Trip Member'
+        const email = member.email || null
+        const linkedUserId = member.user_id || null
+
+        // If we have email/linked_user_id, we can use the RPC or careful insert
+        if (email || linkedUserId) {
+            // Use RPC if email exists (handles updating existing unlinked friends etc)
+            // But RPC 'add_friend_with_email' requires email.
+            if (email) {
+                const { error } = await supabase.rpc('add_friend_with_email', {
+                    p_name: name,
+                    p_email: email
+                })
+                if (!error) successCount++
+            } else {
+                 // Linked user but no email? (Unlikely from trip member logic but possible)
+                 // Insert directly
+                 const { error } = await supabase.from('friends').insert({
+                     user_id: user.id,
+                     name: name,
+                     email: null,
+                     linked_user_id: linkedUserId
+                 })
+                 if (!error) successCount++
+            }
+        } else {
+            // No email, no linked user (Local friend)
+            // Just insert
+            const { error } = await supabase.from('friends').insert({
+                user_id: user.id,
+                name: name,
+                email: null,
+                linked_user_id: null
+            })
+            if (!error) successCount++
+        }
+      }
+      
+      alert(`Successfully added ${successCount} member(s) to friends!`)
+    } catch (err: any) {
+      alert('Failed to add members: ' + err.message)
+    }
   }
 
   const handleFormSubmit = async (data: ExpenseFormState) => {
@@ -230,7 +407,7 @@ const TripDetailsPage: React.FC = () => {
         setFormOpen(false)
         setEditingExpense(undefined)
     } catch (err: any) {
-        setFormError(err.message)
+
         alert('Failed to save: ' + err.message)
     }
   }
@@ -591,23 +768,7 @@ const TripDetailsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      <header className="flex items-center gap-4 pt-14 md:pt-0 justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/app/trips')} className="p-2 rounded-full hover:bg-slate-800 text-slate-400 transition">
-            <ArrowLeftIcon className="w-5 h-5" />
-          </button>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-100">{trip.name}</h2>
-            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
-               <span className="flex items-center gap-1"><CalendarIcon className="w-4 h-4" /> {trip.start_date || 'N/A'} - {trip.end_date || 'N/A'}</span>
-               <span>•</span>
-               <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {Object.keys(memberStats).length} Members</span>
-            </div>
-          </div>
-        </div>
-        {/* Mobile Sidebar Toggle is in AppLayout, we just show content */}
-        <div></div> {/* Spacer */}
-      </header>
+
       
       {/* Portal to AppLayout Header */}
       {portalTarget && createPortal(
@@ -640,57 +801,55 @@ const TripDetailsPage: React.FC = () => {
              </button>
             </>
           )}
-
-          <div className="relative">
-            <button 
-              onClick={() => setNotificationsOpen(!notificationsOpen)}
-              className="p-2 rounded-full hover:bg-slate-800 text-slate-400 transition relative"
-            >
-              <BellIcon className="w-6 h-6" />
-              {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center font-bold">
-                  {unreadCount}
-                </span>
-              )}
-            </button>
-            
-            {notificationsOpen && (
-              <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-                 <div className="p-3 border-b border-slate-800 bg-slate-800/50">
-                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Notifications</h4>
-                 </div>
-                 <div className="max-h-80 overflow-y-auto">
-                   {notifications.length === 0 ? (
-                     <div className="p-6 text-center text-slate-500 text-sm">No notifications</div>
-                   ) : (
-                     notifications.map(n => (
-                       <div 
-                         key={n.id} 
-                         className={`p-3 border-b border-slate-800/50 hover:bg-slate-800/30 transition text-sm ${!n.is_read ? 'bg-slate-800/10' : ''}`}
-                         onClick={() => markAsRead(n.id)}
-                       >
-                         <div className="font-semibold text-slate-200">{n.title}</div>
-                         <div className="text-slate-400 mt-1">{n.message}</div>
-                         <div className="text-[10px] text-slate-600 mt-2 text-right">
-                           {new Date(n.created_at).toLocaleString()}
-                         </div>
-                       </div>
-                     ))
-                   )}
-                 </div>
-              </div>
-            )}
-          </div>
         </div>,
-        portalTarget
+        document.body
       )}
 
-      
-      {formError && (
-        <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-sm mb-6">
-          {formError}
+      {/* Main Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <button 
+            onClick={() => navigate('/trips')}
+            className="text-slate-400 hover:text-slate-200 flex items-center gap-2 mb-2 text-sm font-medium transition"
+          >
+            <ArrowLeftIcon className="w-4 h-4" /> Back to Trips
+          </button>
+          <div className="flex items-center gap-4">
+             <h1 className="text-3xl font-bold text-white tracking-tight">{trip?.name}</h1>
+             {trip?.role === 'owner' && (
+                <span className="bg-amber-500/10 text-amber-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-amber-500/20">
+                  Owner
+                </span>
+             )}
+          </div>
+          <div className="flex items-center gap-4 text-slate-400 text-sm mt-2">
+            <span className="flex items-center gap-1"><CalendarIcon className="w-4 h-4" /> {new Date(trip?.start_date).toLocaleDateString()} - {new Date(trip?.end_date).toLocaleDateString()}</span>
+            <button 
+                onClick={() => setMembersDialogOpen(true)}
+                className="flex items-center gap-1 hover:text-emerald-400 hover:bg-emerald-400/10 px-2 py-0.5 -ml-2 rounded transition cursor-pointer"
+            >
+                <UserGroupIcon className="w-4 h-4" /> {Object.keys(memberStats).length} Members
+            </button>
+          </div>
         </div>
-      )}
+        
+        {/* Header Actions */}
+
+        <div className="flex gap-3">
+          
+          {permissions.canEditTrip && (
+            <button
+              onClick={() => {
+                setFormOpen(true)
+                setEditingExpense(undefined)
+              }}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium transition shadow-lg shadow-emerald-900/20 flex items-center gap-2"
+            >
+              <span>+ Add Expense</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="border-b border-slate-800 flex gap-6 text-sm overflow-x-auto">
@@ -733,6 +892,7 @@ const TripDetailsPage: React.FC = () => {
             isOverBudget={isOverBudget}
             memberCount={Object.keys(memberStats).length}
             userName={currentUserName}
+            onViewMembers={() => setMemberModalOpen(true)}
           />
         )}
 
@@ -969,6 +1129,95 @@ const TripDetailsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Friend Sync Confirmation Dialog */}
+      {pendingFriendAdd && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl border border-slate-700">
+            <h3 className="text-xl font-semibold text-white mb-3">Add to Friends?</h3>
+            <p className="text-slate-300 mb-6">
+              Would you like to add <span className="font-medium text-emerald-400">{pendingFriendAdd.name}</span> to your friends list?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingFriendAdd(null)}
+                className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors"
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => void handleAddToFriends()}
+                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-medium transition-colors"
+              >
+                Add to Friends
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Trip Members Dialog (View Only + Add Friend) */}
+      <TripMembersDialog
+        open={membersDialogOpen}
+        onClose={() => setMembersDialogOpen(false)}
+        members={members}
+        currentUserId={user?.id}
+        friends={friends}
+        onBulkAdd={handleBulkAddToFriends}
+        onAddFriend={(member) => {
+            if (!member.email) {
+                alert("Cannot add member without an email address.")
+                return
+            }
+            // Initiate Add Friend flow
+            const name = member.friends?.name || member.email.split('@')[0] || 'Member'
+            setPendingFriendAdd({
+                name: name,
+                email: member.email,
+                linked_user_id: member.user_id
+            })
+            setMembersDialogOpen(false)
+        }}
+      />
+
+      {/* Expense Details Dialog (Read-Only) */}
+      <ExpenseDetailsDialog 
+         isOpen={detailsOpen}
+         onClose={() => setDetailsOpen(false)}
+         expense={viewExpense}
+         categoryName={(() => {
+             const c = categories.find(cat => cat.id === viewExpense?.category_id)
+             return c ? c.name : 'Uncategorized'
+         })()}
+         payerName={(() => {
+             if (!viewExpense) return 'Unknown'
+             if (viewExpense.payer_id) {
+                 // Try to resolve payer name from members
+                 const m = members.find(mem => mem.friend_id === viewExpense.payer_id)
+                 return m?.friends?.name || viewExpense.payer?.name || 'Friend'
+             }
+             return viewExpense.profiles?.full_name || 'Unknown'
+         })()}
+         userName={currentUserName}
+         onEdit={permissions.canEditExpenses ? (id) => {
+             setDetailsOpen(false)
+             startEdit(id)
+         } : undefined}
+          onDelete={permissions.canDeleteExpenses ? async (id) => {
+              if (window.confirm('Delete this expense?')) {
+                  const { error } = await supabase.from('expenses').delete().eq('id', id)
+                  if (error) {
+                      alert('Failed to delete expense: ' + error.message)
+                      return
+                  }
+                  
+                  setExpenses(prev => prev.filter(e => e.id !== id))
+                  await fetchTripData()
+                  setDetailsOpen(false)
+              }
+          } : undefined}
+      />
     </div>
   )
 }

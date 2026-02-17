@@ -9,6 +9,7 @@ export type Notification = {
   is_read: boolean
   type: 'reminder' | 'settlement' | 'invite' | 'system' | 'expense'
   created_at: string
+  trip_id?: string
   metadata?: any
 }
 

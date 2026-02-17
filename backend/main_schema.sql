@@ -43,32 +43,43 @@ $$;
 -- RLS Helper: Can view a friend bypassing recursion?
 create or replace function public.can_view_friend_bypassing_rls(check_friend_id uuid)
 returns boolean language sql security definer stable as $$
-  select exists (
-    -- 1. User owns the friend
-    select 1 from public.friends f
-    where f.id = check_friend_id 
-    and f.user_id = auth.uid()
+  SELECT EXISTS (
+    -- 1. User owns the friend (and it's not self-referencing)
+    SELECT 1 FROM public.friends f
+    WHERE f.id = check_friend_id 
+      AND f.user_id = auth.uid()
+      AND (f.linked_user_id IS NULL OR f.linked_user_id != auth.uid())  -- Not self
   ) 
-  OR exists (
-    -- 2. Friend is payer of a visible expense
-    select 1 from public.expenses e
-    where e.payer_id = check_friend_id
-    and (
-      e.user_id = auth.uid() 
-      or (e.trip_id is not null and public.can_access_trip(e.trip_id))
-      or public.is_involved_in_split(e.id)
-    )
+  OR EXISTS (
+    -- 2. Friend links TO the current user (critical for cross-user share calculation)
+    SELECT 1 FROM public.friends f
+    WHERE f.id = check_friend_id
+      AND f.linked_user_id = auth.uid()  -- Friend record links to you
+  )
+  OR EXISTS (
+    -- 3. Friend is payer of a visible expense (and friend is not me)
+    SELECT 1 FROM public.friends f
+    JOIN public.expenses e ON e.payer_id = f.id
+    WHERE f.id = check_friend_id
+      AND (f.linked_user_id IS NULL OR f.linked_user_id != auth.uid())  -- Not self
+      AND (
+        e.user_id = auth.uid() 
+        OR (e.trip_id IS NOT NULL AND public.can_access_trip(e.trip_id))
+        OR public.is_involved_in_split(e.id)
+      )
   ) 
-  OR exists (
-    -- 3. Friend is involved in a split of a visible expense
-    select 1 from public.expense_splits es
-    join public.expenses e on e.id = es.expense_id
-    where (es.friend_id = check_friend_id OR es.owed_to_friend_id = check_friend_id)
-    and (
-      e.user_id = auth.uid() 
-      or (e.trip_id is not null and public.can_access_trip(e.trip_id))
-      or public.is_involved_in_split(e.id)
-    )
+  OR EXISTS (
+    -- 4. Friend is involved in a split of a visible expense (and friend is not me)
+    SELECT 1 FROM public.friends f
+    JOIN public.expense_splits es ON (es.friend_id = f.id OR es.owed_to_friend_id = f.id)
+    JOIN public.expenses e ON e.id = es.expense_id
+    WHERE f.id = check_friend_id
+      AND (f.linked_user_id IS NULL OR f.linked_user_id != auth.uid())  -- Not self
+      AND (
+        e.user_id = auth.uid() 
+        OR (e.trip_id IS NOT NULL AND public.can_access_trip(e.trip_id))
+        OR public.is_involved_in_split(e.id)
+      )
   );
 $$;
 
@@ -125,13 +136,12 @@ CREATE TABLE IF NOT EXISTS public.categories (
 
 CREATE TABLE IF NOT EXISTS public.friends (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL, -- The owner of the friend entry (must be a profile id now)
+  user_id uuid NOT NULL,
   name text NOT NULL,
   email text,
   linked_user_id uuid,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT friends_pkey PRIMARY KEY (id),
-  -- Per user schema provided, referencing profiles(id) ensures profile exists
   CONSTRAINT friends_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT friends_linked_user_id_fkey FOREIGN KEY (linked_user_id) REFERENCES public.profiles(id)
 );
@@ -166,8 +176,7 @@ CREATE TABLE IF NOT EXISTS public.expenses (
   is_settlement boolean DEFAULT false,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT expenses_pkey PRIMARY KEY (id),
-  -- Added necessary constraints
-  CONSTRAINT expenses_user_id_profiles_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id), -- User specified this
+  CONSTRAINT expenses_user_id_profiles_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT expenses_payer_id_fkey FOREIGN KEY (payer_id) REFERENCES public.friends(id),
   CONSTRAINT expenses_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT expenses_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
@@ -226,8 +235,8 @@ CREATE TABLE IF NOT EXISTS public.trip_members (
   user_id uuid,
   email text,
   role text DEFAULT 'viewer'::text CHECK (role = ANY (ARRAY['admin'::text, 'viewer'::text, 'editor'::text])),
-  can_add_expenses boolean DEFAULT false,
   created_at timestamp with time zone DEFAULT now(),
+  can_add_expenses boolean DEFAULT false,
   CONSTRAINT trip_members_pkey PRIMARY KEY (id),
   CONSTRAINT trip_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT trip_members_trip_id_fkey FOREIGN KEY (trip_id) REFERENCES public.trips(id),
@@ -238,12 +247,81 @@ CREATE TABLE IF NOT EXISTS public.trip_members (
 -- 3. TRIGGERS
 ----------------------------------------------------------------------------------------------------
 
--- Trigger for new user handling
+-- Trigger: Auto-create profile on new user signup
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
-after insert on auth.users
-for each row execute procedure public.handle_new_user();
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
+-- Trigger: Auto-sync trip_members when friend is linked
+CREATE OR REPLACE FUNCTION public.sync_trip_members_on_friend_link()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- When a friend.linked_user_id is set (null -> uuid or changed)
+  -- Update all trip_members that reference this friend_id
+  IF NEW.linked_user_id IS NOT NULL AND (OLD.linked_user_id IS NULL OR OLD.linked_user_id != NEW.linked_user_id) THEN
+    UPDATE public.trip_members
+    SET user_id = NEW.linked_user_id
+    WHERE friend_id = NEW.id
+      AND (user_id IS NULL OR user_id != NEW.linked_user_id);
+  END IF;
+  
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS sync_trip_members_on_friend_link_trigger ON public.friends;
+CREATE TRIGGER sync_trip_members_on_friend_link_trigger
+  AFTER INSERT OR UPDATE OF linked_user_id
+  ON public.friends
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_trip_members_on_friend_link();
+
+-- Trigger: Auto-create inverse friendships (two-way sync)
+CREATE OR REPLACE FUNCTION public.sync_inverse_friendship()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  --Only create inverse if:
+  -- 1. New friend has linked_user_id (is registered)
+  -- 2. Not a self-friendship
+  -- 3. Inverse doesn't already exist
+  IF NEW.linked_user_id IS NOT NULL 
+     AND NEW.user_id != NEW.linked_user_id 
+     AND NOT EXISTS (
+       SELECT 1 FROM public.friends
+       WHERE user_id = NEW.linked_user_id
+         AND linked_user_id = NEW.user_id
+     ) THEN
+    
+    -- Create inverse friendship
+    INSERT INTO public.friends (user_id, name, email, linked_user_id)
+    SELECT 
+      NEW.linked_user_id,                                  -- Friend's user_id
+      p.full_name,                                         -- Owner's name
+      u.email,                                             -- Owner's email
+      NEW.user_id                                          -- Owner's user_id
+    FROM auth.users u
+    INNER JOIN public.profiles p ON p.id = NEW.user_id
+    WHERE u.id = NEW.user_id;
+    
+  END IF;
+  
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS sync_inverse_friendship_trigger ON public.friends;
+CREATE TRIGGER sync_inverse_friendship_trigger
+  AFTER INSERT OR UPDATE OF linked_user_id
+  ON public.friends
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_inverse_friendship();
 
 ----------------------------------------------------------------------------------------------------
 -- 4. ROW LEVEL SECURITY (RLS) & POLICIES
@@ -302,11 +380,34 @@ using (
 );
 
 -- EXPENSES
+-- Updated policy to ensure all trip members see all trip expenses
 create policy "Users view relevant expenses" on public.expenses for select
 using (
+  -- Personal expenses created by user
   auth.uid() = expenses.user_id 
-  or (expenses.trip_id is not null and public.can_access_trip(expenses.trip_id))
-  or public.is_involved_in_split(expenses.id)
+  OR
+  -- Trip expenses where user is a member (by user_id OR email)
+  (
+    expenses.trip_id IS NOT NULL 
+    AND EXISTS (
+      SELECT 1 FROM public.trips t
+      LEFT JOIN public.trip_members tm ON t.id = tm.trip_id
+      WHERE t.id = expenses.trip_id
+      AND (
+        -- User is trip creator
+        t.user_id = auth.uid()
+        OR
+        -- User is member by user_id
+        tm.user_id = auth.uid()
+        OR
+        -- User is member by email
+        tm.email = auth.jwt()->>'email'
+      )
+    )
+  )
+  OR
+  -- Expenses where user is involved in splits (for non-trip shared expenses)
+  public.is_involved_in_split(expenses.id)
 );
 
 -- INSERT: Personal expenses OR trip expenses with permission

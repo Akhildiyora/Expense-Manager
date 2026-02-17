@@ -33,13 +33,34 @@ const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ isOpen, onC
       await markAsRead(notification.id)
     }
 
-    if (notification.type === 'expense' && notification.metadata?.expense_id) {
-       // Navigate to expenses page and maybe highlight? 
-       // For now just go to expenses page. 
-       // If we want to open edit mode, we could use ?edit=ID
-       navigate(`/app/expenses?edit=${notification.metadata.expense_id}`)
+    const tripId = notification.trip_id || notification.metadata?.trip_id
+    const expenseId = notification.metadata?.expense_id
+
+    if (notification.type === 'expense') {
+       if (tripId) {
+           let url = `/app/trips/${tripId}`
+           if (expenseId) {
+               url += `?viewExpense=${expenseId}`
+           } else {
+               // Fallback to fuzzy matching via URL param
+               // Extract feasible title from message "You owe X for Title"
+               const msg = notification.message || ''
+               const forMatch = msg.match(/for (.+)$/)
+               if (forMatch) {
+                   url += `?searchExpense=${encodeURIComponent(forMatch[1])}`
+               }
+           }
+           navigate(url)
+       } else if (expenseId) {
+           // Fallback to global expenses view
+           navigate(`/app/expenses?view=${expenseId}`)
+       }
     } else if (notification.type === 'settlement') {
-       navigate('/app/expenses')
+        if (tripId) {
+             navigate(`/app/trips/${tripId}`)
+        } else {
+             navigate('/app/expenses')
+        }
     }
     
     onClose()

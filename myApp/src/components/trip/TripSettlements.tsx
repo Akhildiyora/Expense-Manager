@@ -75,10 +75,10 @@ export const TripSettlements: React.FC<TripSettlementsProps> = ({
                   <p className="text-sm font-bold text-slate-200">₹{stats.paid.toLocaleString()}</p>
                 </div>
                 <div className="flex justify-between items-center text-[10px] text-slate-500 uppercase tracking-wider">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col gap-0.5">
                       <span>Share: ₹{stats.share.toLocaleString()}</span>
                       <span className={stats.balance >= 0 ? 'text-emerald-500' : 'text-rose-400'}>
-                      {stats.balance >= 0 ? `+₹${stats.balance.toFixed(0)}` : `-₹${Math.abs(stats.balance).toFixed(0)}`}
+                      {stats.balance >= 0 ? `+₹${stats.balance.toFixed(0)}` : `-₹${Math.abs(stats.balance).toFixed(0)}`} <span className="text-slate-600">remain</span>
                       </span>
                   </div>
                 </div>

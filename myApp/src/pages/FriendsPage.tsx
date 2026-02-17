@@ -51,11 +51,24 @@ const FriendsPage: React.FC = () => {
   const fetchFriendExpenses = async (friendId: string) => {
     setLoadingFriendExpenses(true)
     try {
-      // 1. Get IDs of expenses where this friend is in the split
+      // Find the selected friend and get their linked_user_id
+      const selectedFriendRecord = friends.find(f => f.id === friendId)
+      const linkedUserId = selectedFriendRecord?.linked_user_id
+      
+      // Get ALL friend_ids that represent this same person (via linked_user_id)
+      const allFriendIdsForPerson: string[] = [friendId]
+      if (linkedUserId) {
+        const otherFriendIds = friends
+          .filter(f => f.linked_user_id === linkedUserId && f.id !== friendId)
+          .map(f => f.id)
+        allFriendIdsForPerson.push(...otherFriendIds)
+      }
+      
+      // 1. Get IDs of expenses where ANY of these friend_ids is in the split
       const { data: splitRows, error: splitErr } = await supabase
         .from('expense_splits')
         .select('expense_id')
-        .eq('friend_id', friendId)
+        .in('friend_id', allFriendIdsForPerson)
       
       if (splitErr) throw splitErr
       
@@ -68,9 +81,9 @@ const FriendsPage: React.FC = () => {
         .is('trip_id', null) // STRICT SEPARATION
       
       if (splitExpenseIds.length > 0) {
-        query = query.or(`payer_id.eq.${friendId},id.in.(${splitExpenseIds.join(',')})`)
+        query = query.or(`payer_id.in.(${allFriendIdsForPerson.join(',')}),id.in.(${splitExpenseIds.join(',')})`)
       } else {
-        query = query.eq('payer_id', friendId)
+        query = query.in('payer_id', allFriendIdsForPerson)
       }
       
       const { data, error: expErr } = await query.order('date', { ascending: false })
@@ -226,6 +239,20 @@ const FriendsPage: React.FC = () => {
 
       const expenses = (expenseData ?? []) as any[]
 
+      // Build a map of friend_id -> linked_user_id for cross-referencing
+      const friendIdToLinkedUserId: Record<string, string> = {}
+      const linkedUserIdToFriendIds: Record<string, string[]> = {}
+      
+      friends.forEach(f => {
+        if (f.linked_user_id) {
+          friendIdToLinkedUserId[f.id] = f.linked_user_id
+          if (!linkedUserIdToFriendIds[f.linked_user_id]) {
+            linkedUserIdToFriendIds[f.linked_user_id] = []
+          }
+          linkedUserIdToFriendIds[f.linked_user_id].push(f.id)
+        }
+      })
+
       const totals: Record<string, number> = {}
       const detailed: Record<string, { paid: number; userOwes: number; theyOwe: number }> = {}
 
@@ -235,10 +262,22 @@ const FriendsPage: React.FC = () => {
       })
 
       expenses.forEach((exp) => {
+        // Helper to get all friend_ids that represent the same person
+        const getAllFriendIds = (friendId: string): string[] => {
+          const linkedUserId = friendIdToLinkedUserId[friendId]
+          if (linkedUserId && linkedUserIdToFriendIds[linkedUserId]) {
+            return linkedUserIdToFriendIds[linkedUserId]
+          }
+          return [friendId]
+        }
+
         // Calculate total paid by friend
         if (exp.payer_id) {
-            if (!detailed[exp.payer_id]) detailed[exp.payer_id] = { paid: 0, userOwes: 0, theyOwe: 0 }
-            detailed[exp.payer_id].paid += Number(exp.amount)
+          const allPayerIds = getAllFriendIds(exp.payer_id)
+          allPayerIds.forEach(payerId => {
+            if (!detailed[payerId]) detailed[payerId] = { paid: 0, userOwes: 0, theyOwe: 0 }
+            detailed[payerId].paid += Number(exp.amount) / allPayerIds.length
+          })
         }
 
         // Calculate splits
@@ -248,15 +287,21 @@ const FriendsPage: React.FC = () => {
             if (amt === 0) return
             
             if (split.friend_id && !split.owed_to_friend_id) {
-                // Friend owes user
-                totals[split.friend_id] = (totals[split.friend_id] ?? 0) + amt
-                if (!detailed[split.friend_id]) detailed[split.friend_id] = { paid: 0, userOwes: 0, theyOwe: 0 }
-                detailed[split.friend_id].theyOwe += amt
+                // Friend owes user - distribute to all friend_ids representing this person
+                const allFriendIds = getAllFriendIds(split.friend_id)
+                allFriendIds.forEach(friendId => {
+                  totals[friendId] = (totals[friendId] ?? 0) + (amt / allFriendIds.length)
+                  if (!detailed[friendId]) detailed[friendId] = { paid: 0, userOwes: 0, theyOwe: 0 }
+                  detailed[friendId].theyOwe += amt / allFriendIds.length
+                })
             } else if (!split.friend_id && split.owed_to_friend_id) {
-                // User owes friend
-                totals[split.owed_to_friend_id] = (totals[split.owed_to_friend_id] ?? 0) - amt
-                if (!detailed[split.owed_to_friend_id]) detailed[split.owed_to_friend_id] = { paid: 0, userOwes: 0, theyOwe: 0 }
-                detailed[split.owed_to_friend_id].userOwes += amt
+                // User owes friend - distribute to all friend_ids representing this person
+                const allFriendIds = getAllFriendIds(split.owed_to_friend_id)
+                allFriendIds.forEach(friendId => {
+                  totals[friendId] = (totals[friendId] ?? 0) - (amt / allFriendIds.length)
+                  if (!detailed[friendId]) detailed[friendId] = { paid: 0, userOwes: 0, theyOwe: 0 }
+                  detailed[friendId].userOwes += amt / allFriendIds.length
+                })
             }
         })
       })
@@ -314,7 +359,7 @@ const FriendsPage: React.FC = () => {
           </div>
           <div className="flex-1 w-full md:min-w-[200px]">
             <label className="block mb-1.5 text-slate-400 text-xs font-medium">
-              {editingId ? 'Edit Email' : 'Email Address (Optional)'}
+              {editingId ? 'Edit Email' : 'Email Address'}
             </label>
             <input
               type="email"
@@ -322,6 +367,7 @@ const FriendsPage: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="To link account & share data"
               className="w-full rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+              required
             />
           </div>
           <div className="flex gap-2">

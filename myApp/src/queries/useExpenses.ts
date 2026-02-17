@@ -20,7 +20,8 @@ export type Expense = {
     friend_id: string | null
     owed_to_friend_id: string | null
     share_amount: number
-    friends?: { linked_user_id: string | null; name: string } | null
+    friend_debtor?: { linked_user_id: string | null; name: string } | null
+    friend_creditor?: { linked_user_id: string | null; name: string } | null
   }[]
   profiles?: { full_name: string | null; email: string | null }
   payer?: { name: string } | null
@@ -58,7 +59,11 @@ export const useExpenses = (filters: ExpenseFilters = {}) => {
         .from('expenses')
         .select(`
           *, 
-          expense_splits(*, friends!friend_id(linked_user_id, name)),
+          expense_splits(
+            *,
+            friend_debtor:friends!friend_id(linked_user_id, name),
+            friend_creditor:friends!owed_to_friend_id(linked_user_id, name)
+          ),
           profiles:user_id(full_name, email),
           payer:friends!payer_id(name),
           category:categories!category_id(name)

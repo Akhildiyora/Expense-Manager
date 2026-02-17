@@ -52,16 +52,27 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
   const personalShare = getPersonalShare(expense, user?.id)
   const currentUserName = userName || user?.user_metadata?.full_name?.split(' ')[0] || 'Me'
 
-  const getFriendName = (id: string | null) => {
+  const getFriendName = (id: string | null, split?: any) => {
       if (!id) return currentUserName
       if (id === user?.id) return currentUserName
+      
+      // First try to get name from the split's friend joins (always available via expense query)
+      // Check both friend_debtor (friend_id) and friend_creditor (owed_to_friend_id)
+      if (split?.friend_debtor?.name) {
+        return split.friend_debtor.name
+      }
+      if (split?.friend_creditor?.name) {
+        return split.friend_creditor.name
+      }
+      
+      // Fallback to local friends list
       const f = friends.find(friend => friend.id === id)
       return f ? f.name : 'Unknown'
   }
 
   // Helper to interpret the split row
-  const renderSplitRow = (split: SplitDetail) => {
-    const debtorName = split.friend_id ? getFriendName(split.friend_id) : currentUserName
+  const renderSplitRow = (split: any) => {
+    const debtorName = split.friend_id ? getFriendName(split.friend_id, split) : currentUserName
     
     return (
         <div key={`${split.friend_id}-${split.owed_to_friend_id}`} className="flex justify-between items-center text-xs py-1">
@@ -135,20 +146,51 @@ export const ExpenseDetailsDialog: React.FC<ExpenseDetailsDialogProps> = ({
                </div>
              )}
              
-             <div className="flex flex-col gap-2 border-b border-slate-800 pb-3">
-                <span className="text-sm text-slate-400">Split Details</span>
-                {splits.length > 0 ? (
-                    <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
-                        <div className="flex justify-between items-center text-xs font-medium text-slate-400 mb-2 border-b border-slate-700/50 pb-1">
-                            <span>Person</span>
-                            <span>Amount</span>
-                        </div>
-                        {splits.map(split => renderSplitRow(split))}
-                    </div>
-                ) : (
-                    <span className="text-sm font-medium text-slate-500">Not split (100% {payerName})</span>
-                )}
-             </div>
+              <div className="flex flex-col gap-2 border-b border-slate-800 pb-3">
+                 <span className="text-sm text-slate-400">Split Details</span>
+                 <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
+                     <div className="flex justify-between items-center text-xs font-medium text-slate-400 mb-2 border-b border-slate-700/50 pb-1">
+                         <span>Person</span>
+                         <span>Amount</span>
+                     </div>
+                     
+                     {/* Payer Row (Derived) */}
+                     {(() => {
+                         const totalSplits = splits.reduce((sum, s) => sum + Number(s.share_amount), 0)
+                         const payerShare = Number(expense.amount) - totalSplits
+                         // Only show if substantial (handle potential float precision issues)
+                         if (payerShare > 0.05) {
+                             return (
+                                 <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/30">
+                                     <span className="text-slate-300 font-medium">
+                                         {payerName} 
+                                         <span className="text-emerald-500/80 text-[10px] ml-1 font-normal">(Payer)</span>
+                                     </span>
+                                     <span className="text-slate-300">₹{payerShare.toFixed(2)}</span>
+                                 </div>
+                             )
+                         }
+                         return null
+                     })()}
+
+                     {splits.length > 0 ? (
+                        splits.map(split => renderSplitRow(split))
+                     ) : (
+                        // If no splits and no payer share calculated (e.g. 100% split? or 0 amount?), 
+                        // fallback (though usually payer has 100% share if no splits)
+                        // If we showed payer above, this part is empty. 
+                        // If we didn't show payer (share 0?), and no splits, then something is weird (0 amount expense).
+                        // But if splits exist, we showed them.
+                        // If splits don't exist, payerShare should be full amount.
+                        // So the "Not split" message below is actually redundant if we show Payer row.
+                        null
+                     )}
+                     
+                     {splits.length === 0 && Number(expense.amount) <= 0 && (
+                         <span className="text-xs text-slate-500 italic">No split details available</span>
+                     )}
+                 </div>
+              </div>
 
              {expense.is_recurring && (
                <div className="flex justify-between border-b border-slate-800 pb-3">

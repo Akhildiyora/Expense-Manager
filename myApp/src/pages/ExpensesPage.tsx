@@ -54,6 +54,7 @@ const ExpensesPage: React.FC = () => {
 
     const newParam = searchParams.get('new')
     const editId = searchParams.get('edit')
+    const viewId = searchParams.get('view')
 
     if (newParam === '1' && !formOpen) {
       startCreate()
@@ -72,8 +73,19 @@ const ExpensesPage: React.FC = () => {
           return next
         })
       }
+    } else if (viewId && !selectedExpenseId) {
+       const expenseExists = expenses.find(e => e.id === viewId)
+       if (expenseExists) {
+           setSelectedExpenseId(viewId)
+           // Clear the param so it doesn't re-trigger
+           setSearchParams((current) => {
+             const next = new URLSearchParams(current)
+             next.delete('view')
+             return next
+           }, { replace: true })
+       }
     }
-  }, [searchParams, formOpen, setSearchParams, loading, expenses])
+  }, [searchParams, formOpen, setSearchParams, loading, expenses, selectedExpenseId])
 
   const startEdit = (id: string) => {
     const existing = expenses.find((e) => e.id === id)

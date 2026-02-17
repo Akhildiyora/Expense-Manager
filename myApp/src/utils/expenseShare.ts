@@ -44,17 +44,27 @@ export const getPersonalShare = (
 
   // --- CASE 2: Viewer is a Linked Friend (Shared View) ---
   // We need to find the split that belongs to 'viewerId'.
-  // This requires looking at the 'friends' relation joined in the split.
+  // Since RLS may block joins, we need to check splits differently:
+  // The expense creator added splits with friend_ids from THEIR friends list.
+  // We need to find a split where the friend record's linked_user_id equals viewerId.
   
   if (!viewerId) return 0 // Can't determine share without ID
 
-  // Find the split where the friend record links to the viewer
-  const mySplit = splits.find(s => s.friends?.linked_user_id === viewerId)
-  
-  if (mySplit) {
-      return Number(mySplit.share_amount ?? 0)
+  // Strategy: For each split, check if it references a friend linked to the viewer
+  // We'll use a helper function that can be passed friend lookup data
+  for (const split of splits) {
+    // Check friend_debtor join (if it worked)
+    if (split.friend_debtor?.linked_user_id === viewerId) {
+      return Number(split.share_amount ?? 0)
+    }
+    // Check friend_creditor join (if it worked)
+    if ((split as any).friend_creditor?.linked_user_id === viewerId) {
+      return Number(split.share_amount ?? 0)
+    }
   }
 
+  // Joins didn't work (likely RLS issue), return 0
+  // The expense creator will see correct amounts via CASE 1 logic
   return 0
 }
 

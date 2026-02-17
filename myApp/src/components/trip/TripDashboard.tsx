@@ -35,6 +35,7 @@ interface TripDashboardProps {
   budgetUsed: number
   isOverBudget: boolean
   userName: string
+  onViewMembers: () => void
 }
 
 export const TripDashboard: React.FC<TripDashboardProps> = ({
@@ -47,7 +48,8 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
   personalTotal,
   budgetUsed,
   isOverBudget,
-  userName
+  userName,
+  onViewMembers
 }) => {
   const [pieDialogOpen, setPieDialogOpen] = useState(false)
   
@@ -118,12 +120,7 @@ export const TripDashboard: React.FC<TripDashboardProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* Header Info */}
-      <div className="flex items-center gap-3 text-sm text-slate-500">
-        <span className="flex items-center gap-1"><CalendarIcon className="w-4 h-4" /> {trip.start_date || 'N/A'} - {trip.end_date || 'N/A'}</span>
-        <span>•</span>
-        <span className="flex items-center gap-1"><UserGroupIcon className="w-4 h-4" /> {memberCount} Members</span>
-      </div>
+
 
       {/* Overview Cards */}
       <section className="grid gap-4 md:grid-cols-3">

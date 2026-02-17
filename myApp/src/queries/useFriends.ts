@@ -28,6 +28,7 @@ export const useFriends = () => {
       const { data, error: err } = await supabase
         .from('friends')
         .select('*')
+        .eq('user_id', user.id)  // Only fetch friend records you own
         .order('created_at', { ascending: false })
 
       if (err) {
